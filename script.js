@@ -284,9 +284,16 @@ const calculatePrognosis = (state) => {
                     grossNeededFromTaxable = remainingDesiredNet + totalTax;
                     annualWithdrawalTaxAmount += totalTax;
                 } else {
-                    // Original behavior - use standard tax rate
-                    grossNeededFromTaxable = remainingDesiredNet / (1 - taxRate);
-                    annualWithdrawalTaxAmount += grossNeededFromTaxable * taxRate;
+                    // When bond tax is NOT deferred, only tax the stock portion since bond tax is already paid
+                    const stockPortion = remainingDesiredNet * (annualStockPercentage / 100);
+                    const bondPortion = remainingDesiredNet * (annualBondPercentage / 100);
+                    
+                    // Only tax the stock portion, bond portion is already taxed
+                    const stockTax = stockPortion * taxRate;
+                    const totalTax = stockTax; // No additional bond tax since it's already paid
+                    
+                    grossNeededFromTaxable = remainingDesiredNet + totalTax;
+                    annualWithdrawalTaxAmount += totalTax;
                 }
                 
                 grossWithdrawal += grossNeededFromTaxable;
@@ -317,8 +324,13 @@ const calculatePrognosis = (state) => {
                     const bondTax = bondPortion * bondTaxRate;
                     deferredEventTax = stockTax + bondTax;
                 } else {
-                    // Original behavior - use standard tax rate
-                    deferredEventTax = taxableWithdrawal * taxRate;
+                    // When bond tax is NOT deferred, only tax the stock portion since bond tax is already paid
+                    const stockPortion = taxableWithdrawal * (annualStockPercentage / 100);
+                    const bondPortion = taxableWithdrawal * (annualBondPercentage / 100);
+                    
+                    // Only tax the stock portion, bond portion is already taxed
+                    const stockTax = stockPortion * taxRate;
+                    deferredEventTax = stockTax; // No additional bond tax since it's already paid
                 }
             }
         }

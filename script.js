@@ -85,9 +85,9 @@ const CHART_COLORS = {
     avkastning: '#88CCEE', // Lysere blå
     sparing: '#3388CC', // Hovedblå
     utbetaling_netto: '#005599', // Mørkere blå for uttak
-    utbetaling_skatt: '#CC0000', // Rød
+    utbetaling_skatt: '#FFD700', // Yellow for tax on events
     event_total_color: '#CC0000', // Rød
-    renteskatt: '#CC0000', // Rød
+    renteskatt: '#FFD700', // Yellow for tax on events
     skatt2: '#FFD700', // Yellow for tax on events
     aksjeandel: '#66CCDD', // Teal
     renteandel: '#A9BCCD', // Lys grå-blå
@@ -100,7 +100,7 @@ const LEGEND_DATA = [
     { label: 'Årlig sparing', color: CHART_COLORS.sparing },
     { label: 'Hendelser', color: CHART_COLORS.event_total_color },
     { label: 'Netto utbetaling', color: CHART_COLORS.utbetaling_netto },
-    { label: 'Skatt', color: CHART_COLORS.utbetaling_skatt },
+    { label: 'Skatt på årlige utbetalinger', color: CHART_COLORS.utbetaling_skatt },
     { label: 'Skatt på hendelser', color: CHART_COLORS.skatt2 },
     { label: 'Løpende renteskatt', color: CHART_COLORS.renteskatt }
 ];
@@ -115,7 +115,7 @@ const INITIAL_APP_STATE = {
     stockReturnRate: 8.0,
     bondReturnRate: 5.0,
     shieldingRate: 3.9,
-    taxRate: 37.8,
+    taxRate: 37.84,
     annualSavings: 0,
     events: [],
     taperingOption: 'none',
@@ -183,7 +183,8 @@ const calculatePrognosis = (state) => {
     let currentPortfolioValue = state.initialPortfolioSize;
     let taxFreeCapitalRemaining = state.investedCapital;
     let deferredEventTax = 0; // Tax from an event to be paid NEXT year.
-    let accumulatedBondTax = 0; // Accumulated bond tax when deferred
+    let deferredBondTax = 0; // Bond tax to be paid NEXT year (when not using deferred mode)
+    let accumulatedBondTax = 0; // Accumulated bond tax when deferred mode is enabled
 
     const stockReturnRate = state.stockReturnRate / 100;
     const bondReturnRate = state.bondReturnRate / 100;
@@ -202,10 +203,11 @@ const calculatePrognosis = (state) => {
         
         // --- START OF YEAR ---
 
-        // 1. Pay deferred tax from LAST year's event
-        const taxToPayThisYear = deferredEventTax;
+        // 1. Pay deferred tax from LAST year's event and bond tax
+        const taxToPayThisYear = deferredEventTax + deferredBondTax;
         currentPortfolioValue -= taxToPayThisYear;
         deferredEventTax = 0; // Reset for the current year's calculation.
+        deferredBondTax = 0; // Reset for the current year's calculation.
 
         // 2. Grow tax-free capital with shielding rate
         taxFreeCapitalRemaining *= (1 + shieldingRate);
@@ -247,8 +249,9 @@ const calculatePrognosis = (state) => {
                 accumulatedBondTax += grossBondReturn * bondTaxRate;
                 annualBondTaxAmount = 0; // No immediate bond tax
             } else {
-                // Pay bond tax immediately (original behavior)
-                annualBondTaxAmount = grossBondReturn * bondTaxRate;
+                // Defer bond tax to next year (new behavior)
+                deferredBondTax += grossBondReturn * bondTaxRate;
+                annualBondTaxAmount = 0; // No immediate bond tax
             }
             
             currentPortfolioValue += totalGrossReturn - annualBondTaxAmount;
@@ -344,7 +347,7 @@ const calculatePrognosis = (state) => {
         data.event_total.push(Math.round(netEventAmountForChart));
         data.nettoUtbetaling.push(Math.round(-annualNetWithdrawalAmountForChart));
         data.skatt.push(Math.round(-annualWithdrawalTaxAmount));
-        data.skatt2.push(Math.round(-taxToPayThisYear)); // Push the tax that was paid THIS year
+        data.skatt2.push(Math.round(-taxToPayThisYear)); // Push the deferred tax that was paid THIS year
         data.renteskatt.push(Math.round(-annualBondTaxAmount));
         data.annualStockPercentages.push(Math.round(annualStockPercentage));
         data.annualBondPercentages.push(Math.round(annualBondPercentage));
@@ -489,10 +492,10 @@ const EventRow = ({ event, onUpdate, onRemove, maxYear }) => {
                     {/* Highlighted track */}
                     <div className="absolute h-1.5 bg-[#66CCDD] rounded-full top-1/2 -translate-y-1/2" style={{ left: `${leftPercent}%`, width: `${Math.max(0, widthPercent)}%` }}></div>
                     
-                    {/* Start Year Label */}
-                    <span className="absolute text-xs text-gray-500 -bottom-5" style={{ left: `${leftPercent}%`, transform: 'translateX(-50%)' }}>{event.startAar}</span>
-                    {/* End Year Label */}
-                    <span className="absolute text-xs text-gray-500 -bottom-5" style={{ left: `${leftPercent + widthPercent}%`, transform: 'translateX(-50%)' }}>{event.sluttAar}</span>
+                                         {/* Start Year Label */}
+                     <span className="absolute text-sm text-gray-500 -bottom-8" style={{ left: `${leftPercent}%`, transform: 'translateX(-50%)' }}>{event.startAar}</span>
+                     {/* End Year Label */}
+                     <span className="absolute text-sm text-gray-500 -bottom-8" style={{ left: `${leftPercent + widthPercent}%`, transform: 'translateX(-50%)' }}>{event.sluttAar}</span>
 
                     {/* Start slider (bottom layer) */}
                     <input 
@@ -678,7 +681,7 @@ function App() {
                     {/* Assumptions Panel */}
                     <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col gap-6">
                         <h2 className="text-2xl font-bold text-[#4A6D8C]">Forutsetninger</h2>
-                        <SliderInput id="initialPortfolioSize" label="Porteføljestørrelse (NOK)" value={state.initialPortfolioSize} min={2500000} max={250000000} step={500000} onChange={handleStateChange} isCurrency />
+                        <SliderInput id="initialPortfolioSize" label="Porteføljestørrelse (NOK)" value={state.initialPortfolioSize} min={2500000} max={150000000} step={500000} onChange={handleStateChange} isCurrency />
                         <SliderInput id="investedCapital" label="Innskutt kapital (skattefri) (NOK)" value={state.investedCapital} min={0} max={state.initialPortfolioSize} step={100000} onChange={handleStateChange} isCurrency />
                         <SliderInput id="investmentYears" label="Antall år investeringsperiode" value={state.investmentYears} min={1} max={30} step={1} onChange={handleStateChange} unit="år" />
                         <SliderInput id="payoutYears" label="Antall år med utbetaling" value={state.payoutYears} min={0} max={30} step={1} onChange={handleStateChange} unit="år" />
@@ -689,7 +692,7 @@ function App() {
                          
                          {/* Ønsket årlig utbetaling - flyttet ned under Nullstill alt */}
                          <div>
-                             <label className="font-medium text-sm uppercase tracking-wider text-[#333333]/80">Ønsket årlig utbetaling</label>
+                             <h3 className="text-2xl font-bold text-[#4A6D8C] mb-4">Ønsket årlig utbetaling</h3>
                              <div className="mt-4 space-y-4">
                                  <SliderInput 
                                      id="desiredAnnualConsumptionPayout" 
@@ -751,8 +754,8 @@ function App() {
                         <SliderInput id="stockReturnRate" label="Forventet avkastning aksjer" value={state.stockReturnRate} min={6} max={12} step={0.1} onChange={handleStateChange} displayValue={`${state.stockReturnRate.toFixed(1)}%`} />
                         <SliderInput id="bondReturnRate" label="Forventet avkastning renter" value={state.bondReturnRate} min={3} max={9} step={0.1} onChange={handleStateChange} displayValue={`${state.bondReturnRate.toFixed(1)}%`} />
                         <SliderInput id="shieldingRate" label="Skjermingsrente" value={state.shieldingRate} min={2} max={7} step={0.1} onChange={handleStateChange} displayValue={`${state.shieldingRate.toFixed(1)}%`} />
-                        <ManualTaxInput id="manualStockTaxRate" label="Manuell aksjeskatt (%)" value={state.manualStockTaxRate} onChange={handleStateChange} />
-                        <ManualTaxInput id="manualBondTaxRate" label="Manuell kapitalskatt (%)" value={state.manualBondTaxRate} onChange={handleStateChange} />
+                        <ManualTaxInput id="manualStockTaxRate" label="Utbytteskatt / skatt aksjer (%)" value={state.manualStockTaxRate} onChange={handleStateChange} />
+                        <ManualTaxInput id="manualBondTaxRate" label="Kapitalskatt (%)" value={state.manualBondTaxRate} onChange={handleStateChange} />
                     </div>
 
                     {/* Events Panel - Moved to bottom left */}

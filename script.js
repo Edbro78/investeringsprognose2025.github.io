@@ -107,7 +107,7 @@ const LEGEND_DATA = [
 
 const INITIAL_APP_STATE = {
     initialPortfolioSize: 5000000,
-    investedCapital: 7500000,
+    investedCapital: 2500000,
     investmentYears: 10,
     payoutYears: 10,
     desiredAnnualPayoutAfterTax: 1000000,
@@ -120,6 +120,7 @@ const INITIAL_APP_STATE = {
     events: [],
     taperingOption: 'none',
     deferredBondTax: false, // Ny state for utsatt skatt på renter
+    investorType: 'Privat', // Ny state for AS eller Privat
     manualBondTaxRate: 22.0, // Ny state for manuell kapitalskatt
     manualStockTaxRate: 37.8, // Ny state for manuell aksjebeskatning
     desiredAnnualConsumptionPayout: 800000, // Ny state for ønsket årlig uttak til forbruk
@@ -137,10 +138,10 @@ const STOCK_ALLOCATION_OPTIONS = [
 ];
 
 const TAPERING_OPTIONS = [
-    { id: 'tapering-none', value: 'none', label: 'Ingen nedtrapping', sublabel: '' },
-    { id: 'tapering-5', value: '5%', label: '5% nedtrapping', sublabel: '' },
-    { id: 'tapering-10', value: '10%', label: '10% nedtrapping', sublabel: '' },
-    { id: 'tapering-15', value: '15%', label: '15% nedtrapping', sublabel: '' }
+    { id: 'tapering-none', value: 'none', label: 'Ingen', sublabel: '' },
+    { id: 'tapering-5', value: '5%', label: '5% ', sublabel: '' },
+    { id: 'tapering-10', value: '10%', label: '10% ', sublabel: '' },
+    { id: 'tapering-15', value: '15%', label: '15% ', sublabel: '' }
 ];
 
 // --- From services/prognosisCalculator.ts ---
@@ -213,7 +214,8 @@ const calculatePrognosis = (state) => {
         taxFreeCapitalRemaining *= (1 + shieldingRate);
 
         // 3. Handle inflows (savings and positive events)
-        let totalInflow = state.annualSavings;
+        const isInvestmentYear = i < state.investmentYears;
+        let totalInflow = isInvestmentYear ? state.annualSavings : 0;
         let eventWithdrawal = 0;
         let netEventAmountForChart = 0;
 
@@ -275,8 +277,13 @@ const calculatePrognosis = (state) => {
             if (remainingDesiredNet > 0) {
                 let grossNeededFromTaxable;
                 
-                if (state.deferredBondTax) {
-                    // Calculate tax based on current allocation when deferred bond tax is enabled
+                if (state.investorType === 'AS') {
+                    // AS: All withdrawals taxed as dividends (37.8%) regardless of allocation
+                    const totalTax = remainingDesiredNet * taxRate;
+                    grossNeededFromTaxable = remainingDesiredNet + totalTax;
+                    annualWithdrawalTaxAmount += totalTax;
+                } else if (state.deferredBondTax) {
+                    // Privat with deferred bond tax: Calculate tax based on current allocation
                     const stockPortion = remainingDesiredNet * (annualStockPercentage / 100);
                     const bondPortion = remainingDesiredNet * (annualBondPercentage / 100);
                     
@@ -287,7 +294,7 @@ const calculatePrognosis = (state) => {
                     grossNeededFromTaxable = remainingDesiredNet + totalTax;
                     annualWithdrawalTaxAmount += totalTax;
                 } else {
-                    // When bond tax is NOT deferred, only tax the stock portion since bond tax is already paid
+                    // Privat without deferred bond tax: only tax the stock portion since bond tax is already paid
                     const stockPortion = remainingDesiredNet * (annualStockPercentage / 100);
                     const bondPortion = remainingDesiredNet * (annualBondPercentage / 100);
                     
@@ -318,8 +325,11 @@ const calculatePrognosis = (state) => {
             
             if (taxableWithdrawal > 0) {
                 // Calculate tax, but store it in the deferred variable to be paid NEXT year.
-                if (state.deferredBondTax) {
-                    // Calculate tax based on current allocation when deferred bond tax is enabled
+                if (state.investorType === 'AS') {
+                    // AS: All withdrawals taxed as dividends (37.8%) regardless of allocation
+                    deferredEventTax = taxableWithdrawal * taxRate;
+                } else if (state.deferredBondTax) {
+                    // Privat with deferred bond tax: Calculate tax based on current allocation
                     const stockPortion = taxableWithdrawal * (annualStockPercentage / 100);
                     const bondPortion = taxableWithdrawal * (annualBondPercentage / 100);
                     
@@ -327,7 +337,7 @@ const calculatePrognosis = (state) => {
                     const bondTax = bondPortion * bondTaxRate;
                     deferredEventTax = stockTax + bondTax;
                 } else {
-                    // When bond tax is NOT deferred, only tax the stock portion since bond tax is already paid
+                    // Privat without deferred bond tax: only tax the stock portion since bond tax is already paid
                     const stockPortion = taxableWithdrawal * (annualStockPercentage / 100);
                     const bondPortion = taxableWithdrawal * (annualBondPercentage / 100);
                     
@@ -343,7 +353,7 @@ const calculatePrognosis = (state) => {
         // 6. Push data to arrays for charting
         data.hovedstol.push(Math.round(startOfYearPortfolioValue));
         data.avkastning.push(Math.round(totalGrossReturn));
-        data.sparing.push(Math.round(state.annualSavings));
+        data.sparing.push(Math.round(isInvestmentYear ? state.annualSavings : 0));
         data.event_total.push(Math.round(netEventAmountForChart));
         data.nettoUtbetaling.push(Math.round(-annualNetWithdrawalAmountForChart));
         data.skatt.push(Math.round(-annualWithdrawalTaxAmount));
@@ -403,6 +413,26 @@ const DeferredBondTaxToggle = ({ value, onChange }) => (
                 className={`p-3 rounded-lg flex items-center justify-center text-center font-medium transition-all transform hover:-translate-y-0.5 ${value ? 'bg-[#66CCDD] text-white shadow-lg' : 'bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100'}`}
             >
                 <span>Ja</span>
+            </button>
+        </div>
+    </div>
+);
+
+const InvestorTypeToggle = ({ value, onChange }) => (
+    <div>
+        <label className="font-medium text-sm uppercase tracking-wider text-[#333333]/80">Investor type</label>
+        <div className="grid grid-cols-2 gap-2 mt-2">
+            <button 
+                onClick={() => onChange('investorType', 'AS')} 
+                className={`p-3 rounded-lg flex items-center justify-center text-center font-medium transition-all transform hover:-translate-y-0.5 ${value === 'AS' ? 'bg-[#66CCDD] text-white shadow-lg' : 'bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100'}`}
+            >
+                <span>AS</span>
+            </button>
+            <button 
+                onClick={() => onChange('investorType', 'Privat')} 
+                className={`p-3 rounded-lg flex items-center justify-center text-center font-medium transition-all transform hover:-translate-y-0.5 ${value === 'Privat' ? 'bg-[#66CCDD] text-white shadow-lg' : 'bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100'}`}
+            >
+                <span>Privat</span>
             </button>
         </div>
     </div>
@@ -560,6 +590,7 @@ function App() {
             annualSavings: 0,
             initialStockAllocation: 0, // 100% renter
             events: [],
+            investorType: 'Privat', // Beholder Privat som standard
             manualBondTaxRate: 22.0, // Beholder standard kapitalskatt
             manualStockTaxRate: 37.8, // Beholder standard aksjebeskatning
             desiredAnnualConsumptionPayout: 0, // Nullstiller forbruksutbetaling
@@ -688,6 +719,7 @@ function App() {
                        
                          <SliderInput id="annualSavings" label="Årlig sparing (NOK)" value={state.annualSavings} min={0} max={10000000} step={10000} onChange={handleStateChange} isCurrency />
                          <DeferredBondTaxToggle value={state.deferredBondTax} onChange={handleStateChange} />
+                         <InvestorTypeToggle value={state.investorType} onChange={handleStateChange} />
                          <ResetAllButton onReset={handleResetAll} />
                          
                          {/* Ønsket årlig utbetaling - flyttet ned under Nullstill alt */}
@@ -753,9 +785,31 @@ function App() {
 
                         <SliderInput id="stockReturnRate" label="Forventet avkastning aksjer" value={state.stockReturnRate} min={6} max={12} step={0.1} onChange={handleStateChange} displayValue={`${state.stockReturnRate.toFixed(1)}%`} />
                         <SliderInput id="bondReturnRate" label="Forventet avkastning renter" value={state.bondReturnRate} min={3} max={9} step={0.1} onChange={handleStateChange} displayValue={`${state.bondReturnRate.toFixed(1)}%`} />
-                        <SliderInput id="shieldingRate" label="Skjermingsrente" value={state.shieldingRate} min={2} max={7} step={0.1} onChange={handleStateChange} displayValue={`${state.shieldingRate.toFixed(1)}%`} />
-                        <ManualTaxInput id="manualStockTaxRate" label="Utbytteskatt / skatt aksjer (%)" value={state.manualStockTaxRate} onChange={handleStateChange} />
-                        <ManualTaxInput id="manualBondTaxRate" label="Kapitalskatt (%)" value={state.manualBondTaxRate} onChange={handleStateChange} />
+                        
+                        {/* Forventet avkastning felt */}
+                        <div>
+                            <label className="font-medium text-sm uppercase tracking-wider text-[#333333]/80">Forventet avkastning</label>
+                            <div className="bg-gray-50 border border-[#DDDDDD] rounded-lg p-3 mt-1">
+                                <div className="text-lg font-semibold text-[#4A6D8C]">
+                                    {(() => {
+                                        const stockAllocation = state.initialStockAllocation / 100;
+                                        const bondAllocation = (100 - state.initialStockAllocation) / 100;
+                                        const weightedReturn = (stockAllocation * state.stockReturnRate) + (bondAllocation * state.bondReturnRate);
+                                        return `${weightedReturn.toFixed(1)}%`;
+                                    })()}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        {/* Skatt seksjon */}
+                        <div>
+                            <h3 className="text-2xl font-bold text-[#4A6D8C] mb-4">Skatt</h3>
+                            <div className="space-y-4">
+                                <SliderInput id="shieldingRate" label="Skjermingsrente" value={state.shieldingRate} min={2} max={7} step={0.1} onChange={handleStateChange} displayValue={`${state.shieldingRate.toFixed(1)}%`} />
+                                <ManualTaxInput id="manualStockTaxRate" label="Utbytteskatt / skatt aksjer (%)" value={state.manualStockTaxRate} onChange={handleStateChange} />
+                                <ManualTaxInput id="manualBondTaxRate" label="Kapitalskatt (%)" value={state.manualBondTaxRate} onChange={handleStateChange} />
+                            </div>
+                        </div>
                     </div>
 
                     {/* Events Panel - Moved to bottom left */}

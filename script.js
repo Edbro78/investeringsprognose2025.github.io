@@ -685,7 +685,7 @@ function App() {
             <div className="w-full max-w-[1840px] flex flex-col gap-6">
 
                 <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col">
-                    <h1 className="text-3xl md:text-4xl font-bold text-center text-[#4A6D8C] mb-4">Investeringsprognose</h1>
+                    <h1 className="text-3xl md:text-4xl font-bold text-center text-[#4A6D8C] mb-4">Mål og behov</h1>
                     <div className="relative h-[500px]">
                         <Bar options={chartOptions} data={investmentChartData} />
                     </div>
@@ -802,7 +802,7 @@ function App() {
                         </div>
                         
                         {/* Skatt seksjon */}
-                        <div>
+                        <div className="mt-14 md:mt-20 xl:mt-24">
                             <h3 className="text-2xl font-bold text-[#4A6D8C] mb-4">Skatt</h3>
                             <div className="space-y-4">
                                 <SliderInput id="shieldingRate" label="Skjermingsrente" value={state.shieldingRate} min={2} max={7} step={0.1} onChange={handleStateChange} displayValue={`${state.shieldingRate.toFixed(1)}%`} />

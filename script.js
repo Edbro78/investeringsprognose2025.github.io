@@ -91,7 +91,11 @@ const CHART_COLORS = {
     skatt2: '#FFD700', // Yellow for tax on events
     aksjeandel: '#66CCDD', // Teal
     renteandel: '#A9BCCD', // Lys grå-blå
-    innskutt_kapital: '#3388CC' // Hovedblå
+    innskutt_kapital: '#3388CC', // Hovedblå
+    aksjer_principal: '#66CCDD', // Aksjer (hovedstol) – matchende blå/teal
+    aksjer_avkastning: '#88CCEE', // Aksjeavkastning – lys blå
+    renter_principal: '#A9BCCD', // Renter (hovedstol) – grå-blå
+    renter_avkastning: '#D1DCE7' // Renteavkastning – lys grå-blå
 };
 
 const LEGEND_DATA = [
@@ -184,8 +188,7 @@ const calculatePrognosis = (state) => {
     let currentPortfolioValue = state.initialPortfolioSize;
     let taxFreeCapitalRemaining = state.investedCapital;
     let deferredEventTax = 0; // Tax from an event to be paid NEXT year.
-    let deferredBondTax = 0; // Bond tax to be paid NEXT year (when not using deferred mode)
-    let accumulatedBondTax = 0; // Accumulated bond tax when deferred mode is enabled
+    let deferredBondTax = 0; // Bond tax to be paid NEXT year (when using deferred mode)
 
     const stockReturnRate = state.stockReturnRate / 100;
     const bondReturnRate = state.bondReturnRate / 100;
@@ -196,6 +199,21 @@ const calculatePrognosis = (state) => {
     const annualStockPercentages = populateAnnualStockPercentages(state);
     const totalSimulatedYears = state.investmentYears + state.payoutYears;
 
+    // --- START ROW ("start") BEFORE FIRST YEAR ---
+    labels.push('start');
+    // "Start" skal vise total investeringssum i hovedstol
+    data.hovedstol.push(Math.round(state.initialPortfolioSize));
+    data.avkastning.push(0);
+    data.sparing.push(0);
+    data.event_total.push(0);
+    data.nettoUtbetaling.push(0);
+    data.skatt.push(0);
+    data.skatt2.push(0);
+    data.renteskatt.push(0);
+    data.annualStockPercentages.push(Math.round(state.initialStockAllocation));
+    data.annualBondPercentages.push(Math.round(100 - state.initialStockAllocation));
+    data.investedCapitalHistory.push(Math.round(state.investedCapital));
+
     for (let i = 0; i < totalSimulatedYears; i++) {
         const year = START_YEAR + i;
         labels.push(year.toString());
@@ -204,9 +222,10 @@ const calculatePrognosis = (state) => {
         
         // --- START OF YEAR ---
 
-        // 1. Pay deferred tax from LAST year's event and bond tax
-        const taxToPayThisYear = deferredEventTax + deferredBondTax;
-        currentPortfolioValue -= taxToPayThisYear;
+        // 1. Pay deferred tax from LAST year, split between event tax and bond tax
+        const eventTaxToPayThisYear = deferredEventTax;
+        const bondTaxToPayThisYear = deferredBondTax;
+        currentPortfolioValue -= (eventTaxToPayThisYear + bondTaxToPayThisYear);
         deferredEventTax = 0; // Reset for the current year's calculation.
         deferredBondTax = 0; // Reset for the current year's calculation.
 
@@ -236,7 +255,7 @@ const calculatePrognosis = (state) => {
         const annualStockPercentage = annualStockPercentages[i];
         const annualBondPercentage = 100 - annualStockPercentage;
         let totalGrossReturn = 0;
-        let annualBondTaxAmount = 0;
+        let annualBondTaxAmount = 0; // Bond tax paid for the CURRENT year (immediately, if not deferred)
 
         if (currentPortfolioValue > 0) {
             const stockValue = currentPortfolioValue * (annualStockPercentage / 100);
@@ -247,13 +266,11 @@ const calculatePrognosis = (state) => {
             
             // Handle bond tax based on deferred setting
             if (state.deferredBondTax) {
-                // Accumulate bond tax instead of paying it immediately
-                accumulatedBondTax += grossBondReturn * bondTaxRate;
-                annualBondTaxAmount = 0; // No immediate bond tax
+                // No running bond tax at all; tax on bond returns will only be realized upon event withdrawals
+                annualBondTaxAmount = 0;
             } else {
-                // Defer bond tax to next year (new behavior)
-                deferredBondTax += grossBondReturn * bondTaxRate;
-                annualBondTaxAmount = 0; // No immediate bond tax
+                // Pay bond tax immediately this year
+                annualBondTaxAmount = grossBondReturn * bondTaxRate;
             }
             
             currentPortfolioValue += totalGrossReturn - annualBondTaxAmount;
@@ -268,7 +285,17 @@ const calculatePrognosis = (state) => {
         const totalDesiredPayout = state.desiredAnnualConsumptionPayout + state.desiredAnnualWealthTaxPayout;
         if (isOrdinaryPayoutYear && totalDesiredPayout > 0) {
             let desiredNet = totalDesiredPayout;
-            let fromTaxFree = Math.min(desiredNet, taxFreeCapitalRemaining);
+            const stockShare = (annualStockPercentage / 100);
+            const bondShare = 1 - stockShare;
+            // AS: entire net withdrawal can be covered by invested capital until exhausted
+            // Privat: only the stock portion of the net withdrawal reduces invested capital
+            let fromTaxFree;
+            if (state.investorType === 'Privat') {
+                const stockPortionOfNet = desiredNet * stockShare;
+                fromTaxFree = Math.min(stockPortionOfNet, taxFreeCapitalRemaining);
+            } else {
+                fromTaxFree = Math.min(desiredNet, taxFreeCapitalRemaining);
+            }
             taxFreeCapitalRemaining -= fromTaxFree;
             
             const remainingDesiredNet = desiredNet - fromTaxFree;
@@ -283,24 +310,20 @@ const calculatePrognosis = (state) => {
                     grossNeededFromTaxable = remainingDesiredNet + totalTax;
                     annualWithdrawalTaxAmount += totalTax;
                 } else if (state.deferredBondTax) {
-                    // Privat with deferred bond tax: Calculate tax based on current allocation
-                    const stockPortion = remainingDesiredNet * (annualStockPercentage / 100);
-                    const bondPortion = remainingDesiredNet * (annualBondPercentage / 100);
-                    
-                    const stockTax = stockPortion * taxRate;
-                    const bondTax = bondPortion * bondTaxRate;
-                    const totalTax = stockTax + bondTax;
+                    // Privat with deferred bond tax: do not tax bond portion on ordinary payouts; only stock leftover is taxed
+                    const totalStockPortionNet = desiredNet * stockShare;
+                    const stockLeftoverNet = Math.max(0, totalStockPortionNet - fromTaxFree);
+                    const stockTax = stockLeftoverNet * taxRate;
+                    const totalTax = stockTax;
                     
                     grossNeededFromTaxable = remainingDesiredNet + totalTax;
                     annualWithdrawalTaxAmount += totalTax;
                 } else {
-                    // Privat without deferred bond tax: only tax the stock portion since bond tax is already paid
-                    const stockPortion = remainingDesiredNet * (annualStockPercentage / 100);
-                    const bondPortion = remainingDesiredNet * (annualBondPercentage / 100);
-                    
-                    // Only tax the stock portion, bond portion is already taxed
-                    const stockTax = stockPortion * taxRate;
-                    const totalTax = stockTax; // No additional bond tax since it's already paid
+                    // Privat without deferred bond tax: only tax the leftover stock portion since bond tax is already paid
+                    const totalStockPortionNet = desiredNet * stockShare;
+                    const stockLeftoverNet = Math.max(0, totalStockPortionNet - fromTaxFree);
+                    const stockTax = stockLeftoverNet * taxRate;
+                    const totalTax = stockTax; // No bond tax here
                     
                     grossNeededFromTaxable = remainingDesiredNet + totalTax;
                     annualWithdrawalTaxAmount += totalTax;
@@ -318,32 +341,31 @@ const calculatePrognosis = (state) => {
             
             currentPortfolioValue -= withdrawalAmount; // Reduce portfolio by the withdrawal amount now
 
-            let fromTaxFree = Math.min(withdrawalAmount, taxFreeCapitalRemaining);
-            taxFreeCapitalRemaining -= fromTaxFree;
-
-            const taxableWithdrawal = withdrawalAmount - fromTaxFree;
-            
-            if (taxableWithdrawal > 0) {
-                // Calculate tax, but store it in the deferred variable to be paid NEXT year.
-                if (state.investorType === 'AS') {
-                    // AS: All withdrawals taxed as dividends (37.8%) regardless of allocation
-                    deferredEventTax = taxableWithdrawal * taxRate;
-                } else if (state.deferredBondTax) {
-                    // Privat with deferred bond tax: Calculate tax based on current allocation
-                    const stockPortion = taxableWithdrawal * (annualStockPercentage / 100);
-                    const bondPortion = taxableWithdrawal * (annualBondPercentage / 100);
-                    
-                    const stockTax = stockPortion * taxRate;
-                    const bondTax = bondPortion * bondTaxRate;
+            const stockShare = (annualStockPercentage / 100);
+            const bondShare = 1 - stockShare;
+            if (state.investorType === 'Privat') {
+                // Only the stock portion of the withdrawal can reduce invested capital
+                const stockPortionGross = withdrawalAmount * stockShare;
+                const coveredStock = Math.min(stockPortionGross, taxFreeCapitalRemaining);
+                taxFreeCapitalRemaining -= coveredStock;
+                const taxableFromStock = Math.max(0, stockPortionGross - coveredStock);
+                const taxableFromBond = withdrawalAmount * bondShare;
+                if (state.deferredBondTax) {
+                    // All bond tax triggered only when an event withdrawal happens (this is an event), pay next year
+                    const stockTax = taxableFromStock * taxRate;
+                    const bondTax = taxableFromBond * bondTaxRate;
                     deferredEventTax = stockTax + bondTax;
                 } else {
-                    // Privat without deferred bond tax: only tax the stock portion since bond tax is already paid
-                    const stockPortion = taxableWithdrawal * (annualStockPercentage / 100);
-                    const bondPortion = taxableWithdrawal * (annualBondPercentage / 100);
-                    
-                    // Only tax the stock portion, bond portion is already taxed
-                    const stockTax = stockPortion * taxRate;
-                    deferredEventTax = stockTax; // No additional bond tax since it's already paid
+                    const stockTax = taxableFromStock * taxRate;
+                    deferredEventTax = stockTax;
+                }
+            } else {
+                // AS: invested capital covers the withdrawal first; remainder is taxed as dividend
+                const fromTaxFree = Math.min(withdrawalAmount, taxFreeCapitalRemaining);
+                taxFreeCapitalRemaining -= fromTaxFree;
+                const taxableWithdrawal = withdrawalAmount - fromTaxFree;
+                if (taxableWithdrawal > 0) {
+                    deferredEventTax = taxableWithdrawal * taxRate;
                 }
             }
         }
@@ -357,8 +379,9 @@ const calculatePrognosis = (state) => {
         data.event_total.push(Math.round(netEventAmountForChart));
         data.nettoUtbetaling.push(Math.round(-annualNetWithdrawalAmountForChart));
         data.skatt.push(Math.round(-annualWithdrawalTaxAmount));
-        data.skatt2.push(Math.round(-taxToPayThisYear)); // Push the deferred tax that was paid THIS year
-        data.renteskatt.push(Math.round(-annualBondTaxAmount));
+        data.skatt2.push(Math.round(-eventTaxToPayThisYear)); // Only event tax paid THIS year
+        const bondTaxPaidThisYear = bondTaxToPayThisYear + annualBondTaxAmount; // Deferred from last year + immediate this year
+        data.renteskatt.push(Math.round(-bondTaxPaidThisYear));
         data.annualStockPercentages.push(Math.round(annualStockPercentage));
         data.annualBondPercentages.push(Math.round(annualBondPercentage));
         data.investedCapitalHistory.push(Math.round(taxFreeCapitalRemaining));
@@ -567,6 +590,9 @@ const CustomLegend = ({ items }) => (
 function App() {
     const [state, setState] = useState(INITIAL_APP_STATE);
     const [showAllocationChart, setShowAllocationChart] = useState(false);
+    const [showDistributionGraphic, setShowDistributionGraphic] = useState(true);
+    const [showInvestedCapitalGraphic, setShowInvestedCapitalGraphic] = useState(true);
+    const [showDisclaimer, setShowDisclaimer] = useState(false);
 
     const handleStateChange = useCallback((id, value) => {
         setState(prevState => {
@@ -677,6 +703,102 @@ function App() {
     const allocationChartOptions = { ...chartOptions, scales: { ...chartOptions.scales, y: { ...chartOptions.scales.y, stacked: true, max: 100, ticks: { ...chartOptions.scales.y.ticks, callback: (v) => `${v}%` } } }, plugins: { ...chartOptions.plugins, legend: { display: true, labels: { color: '#333333' } } } };
     const capitalChartOptions = { ...chartOptions, scales: { ...chartOptions.scales, y: { ...chartOptions.scales.y, stacked: false } }, plugins: { ...chartOptions.plugins, legend: { display: true, labels: { color: '#333333' } } } };
     
+    // --- Stacked bar for ALL years: Aksjer, Aksjeavkastning, Renter, Renteavkastning ---
+    const labelsAllYears = useMemo(() => prognosis.labels, [prognosis.labels]); // Include 'start'
+    const startValuesAllYears = useMemo(() => prognosis.data.hovedstol, [prognosis.data.hovedstol]);
+    const stockPctAllYears = useMemo(() => prognosis.data.annualStockPercentages, [prognosis.data.annualStockPercentages]);
+
+    // Start-of-year values (used only for computing returns)
+    const startOfYearStockValues = useMemo(
+        () => startValuesAllYears.map((startValue, i) => Math.round(startValue * (stockPctAllYears[i] / 100))),
+        [startValuesAllYears, stockPctAllYears]
+    );
+    const startOfYearBondValues = useMemo(
+        () => startValuesAllYears.map((startValue, i) => Math.round(startValue * (1 - stockPctAllYears[i] / 100))),
+        [startValuesAllYears, stockPctAllYears]
+    );
+
+    // Principal that only changes with savings/events/payouts (not by returns)
+    const principalStockSeries = useMemo(() => {
+        const len = startValuesAllYears.length;
+        if (len === 0) return [];
+        const principal = new Array(len).fill(0);
+        principal[0] = Math.round(state.initialPortfolioSize * (stockPctAllYears[0] / 100));
+        const sparing = prognosis.data.sparing;
+        const events = prognosis.data.event_total;
+        const netPayout = prognosis.data.nettoUtbetaling; // negative when outflow happens
+        for (let i = 1; i < len; i++) {
+            const prev = principal[i - 1];
+            const inflow = Math.max(0, sparing[i]) + Math.max(0, events[i]);
+            const outflow = (-Math.min(0, events[i])) + (-Math.min(0, netPayout[i]));
+            const stockShare = (stockPctAllYears[i] || 0) / 100;
+            principal[i] = Math.round(prev + inflow * stockShare - outflow * stockShare);
+        }
+        return principal;
+    }, [startValuesAllYears.length, state.initialPortfolioSize, stockPctAllYears, prognosis.data.sparing, prognosis.data.event_total, prognosis.data.nettoUtbetaling]);
+
+    const principalBondSeries = useMemo(() => {
+        const len = startValuesAllYears.length;
+        if (len === 0) return [];
+        const principal = new Array(len).fill(0);
+        principal[0] = Math.round(state.initialPortfolioSize * (1 - stockPctAllYears[0] / 100));
+        const sparing = prognosis.data.sparing;
+        const events = prognosis.data.event_total;
+        const netPayout = prognosis.data.nettoUtbetaling; // negative when outflow happens
+        for (let i = 1; i < len; i++) {
+            const prev = principal[i - 1];
+            const inflow = Math.max(0, sparing[i]) + Math.max(0, events[i]);
+            const outflow = (-Math.min(0, events[i])) + (-Math.min(0, netPayout[i]));
+            const bondShare = 1 - (stockPctAllYears[i] || 0) / 100;
+            principal[i] = Math.round(prev + inflow * bondShare - outflow * bondShare);
+        }
+        return principal;
+    }, [startValuesAllYears.length, state.initialPortfolioSize, stockPctAllYears, prognosis.data.sparing, prognosis.data.event_total, prognosis.data.nettoUtbetaling]);
+    // Årlige bruttoavkastninger per år
+    const aksjeAvkastningAnnual = useMemo(
+        () => startOfYearStockValues.map((v, i) => i === 0 ? 0 : Math.round(v * (state.stockReturnRate / 100))),
+        [startOfYearStockValues, state.stockReturnRate]
+    );
+    const renteAvkastningAnnual = useMemo(
+        () => startOfYearBondValues.map((v, i) => i === 0 ? 0 : Math.round(v * (state.bondReturnRate / 100))),
+        [startOfYearBondValues, state.bondReturnRate]
+    );
+
+    // Akkumulert avkastning siden start for hvert år
+    const aksjeAvkastningCumulative = useMemo(() => {
+        const out = new Array(aksjeAvkastningAnnual.length).fill(0);
+        for (let i = 1; i < aksjeAvkastningAnnual.length; i++) {
+            out[i] = out[i - 1] + aksjeAvkastningAnnual[i];
+        }
+        return out;
+    }, [aksjeAvkastningAnnual]);
+    const renteAvkastningCumulative = useMemo(() => {
+        const out = new Array(renteAvkastningAnnual.length).fill(0);
+        for (let i = 1; i < renteAvkastningAnnual.length; i++) {
+            out[i] = out[i - 1] + renteAvkastningAnnual[i];
+        }
+        return out;
+    }, [renteAvkastningAnnual]);
+
+    const stackedAllYearsData = useMemo(() => ({
+        labels: labelsAllYears,
+        datasets: [
+            { label: 'Aksjer', data: principalStockSeries, backgroundColor: CHART_COLORS.aksjer_principal, stack: 'allYears' },
+            { label: 'Aksjeavkastning', data: aksjeAvkastningCumulative, backgroundColor: CHART_COLORS.aksjer_avkastning, stack: 'allYears' },
+            { label: 'Renter', data: principalBondSeries, backgroundColor: CHART_COLORS.renter_principal, stack: 'allYears' },
+            { label: 'Renteavkastning', data: renteAvkastningCumulative, backgroundColor: CHART_COLORS.renter_avkastning, stack: 'allYears' },
+        ],
+    }), [labelsAllYears, principalStockSeries, aksjeAvkastningCumulative, principalBondSeries, renteAvkastningCumulative]);
+
+    const stackedAllYearsOptions = useMemo(() => ({
+        ...chartOptions,
+        plugins: { ...chartOptions.plugins, legend: { display: true, labels: { color: '#333333' } } },
+        scales: {
+            x: { ...chartOptions.scales.x, stacked: true },
+            y: { ...chartOptions.scales.y, stacked: true },
+        },
+    }), [chartOptions]);
+    
     const totalYears = state.investmentYears + state.payoutYears;
     const maxEventYear = START_YEAR + totalYears - 1;
 
@@ -687,10 +809,77 @@ function App() {
                 <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col">
                     <h1 className="text-3xl md:text-4xl font-bold text-center text-[#4A6D8C] mb-4">Mål og behov</h1>
                     <div className="relative h-[500px]">
+                        <button
+                            onClick={() => setShowDisclaimer(true)}
+                            className="absolute -top-12 left-2 z-10 text-xs px-2 py-1 rounded-md border border-[#4A6D8C] bg-white text-[#4A6D8C] hover:bg-gray-100"
+                            title="Disclaimer/forutsetninger"
+                        >
+                            Disclaimer/forutsetninger
+                        </button>
                         <Bar options={chartOptions} data={investmentChartData} />
                     </div>
                     <CustomLegend items={LEGEND_DATA} />
+                    <div className="mt-6 border border-[#DDDDDD] rounded-xl p-4">
+                        <h2 className="text-xl font-bold text-center text-[#4A6D8C] mb-4">Fordeling mellom aksjer og renter</h2>
+                        <div className="flex justify-start -mt-1 mb-1">
+                            <button
+                                onClick={() => setShowDistributionGraphic(v => !v)}
+                                className="text-xs px-2 py-1 rounded-md border border-[#DDDDDD] bg-white text-[#333333] hover:bg-gray-100"
+                                title={showDistributionGraphic ? 'Skjul grafikk' : 'Vis grafikk'}
+                            >
+                                {showDistributionGraphic ? 'Skjul' : 'Vis'}
+                            </button>
+                        </div>
+                        <div className={`relative ${showDistributionGraphic ? 'h-[260px]' : ''}`}>
+                            {showDistributionGraphic && (
+                                <Bar options={stackedAllYearsOptions} data={stackedAllYearsData} />
+                            )}
+                        </div>
+                    </div>
                 </div>
+
+                {showDisclaimer && (
+                    <div
+                        className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+                        onClick={() => setShowDisclaimer(false)}
+                    >
+                        <div
+                            className="bg-white rounded-xl shadow-2xl max-w-3xl w-full p-8 relative max-h-[80vh] overflow-auto"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <button
+                                aria-label="Lukk"
+                                onClick={() => setShowDisclaimer(false)}
+                                className="absolute top-3 right-3 text-[#333333]/70 hover:text-[#333333]"
+                            >
+                                ✕
+                            </button>
+                            <h3 className="text-lg font-semibold text-[#4A6D8C] mb-3">Disclaimer/forutsetninger</h3>
+                            <div className="text-base text-[#333333]/90 leading-8 whitespace-pre-wrap break-words px-1">
+                                {(() => {
+                                    const t = `Dette er en investeringsberegning som kun er ment som en illustrasjon. Simulert avkastning er ikke basert på reelle tall. Alle skatteberegninger kan være feil, og det er viktig å gjøre egne undersøkelser knyttet til skatt.
+
+Simuleringen skiller mellom privatpersoner og AS. Forskjellen ligger i beskatning av uttak.
+
+I hovedsak vil all skatt alltid defineres som betalbar skatt i påfølgende år. Ett uttak i f.eks år 2026, vil derfor føre til en skatteregning i år 2027 osv.
+
+Privat:
+For en privatperson vil innskutt kapital kun være knyttet til aksjedelen av porteføljen. Uttak vil derfor fordeles mellom aksjer og renter iht aksjeandelen. Om det er innskutt kapital i porteføljen, vil alle aksjeuttak fortrinnsvis hentes ut skattefritt. Når innskutt kapital er gått til null, vil alle aksjeuttak beskattes med 37,8%. Uttak fra renteporteføljen beskattes årlig, og uttak fra renteporteføljen er derfor ferdig beskattede midler det året de ta us.
+
+Velger du i modellen: utsatt skatt på renter, vil akkumulert renteavkastning beskattes i sin helhet det året det gjøres uttak.
+
+AS:
+
+Alle uttak fra et as vil i modellen ansees som et utbytte. Om det er innskutt kapital i porteføljen, vil alle uttak hentes ut skattefritt. Alle uttak utover innskutt kapital vil beskattes med 37,8% i påfølgende år (se eksempel over).
+
+Ønsket årlig utbetaling:
+Summen som legges inn her er et nettobeløp. I den grad det er mulig vil modellen alltid utbetale dette beløpet etter skatt. Beløpet vil derfor med tiden øke. Dette fordi modellen tar hensyn til at det årlige uttaket må være større grunnet skatteregningen knyttet til uttaket.`;
+                                    return t.replace(/\.\s+/g, '.\n\n');
+                                })()}
+                            </div>
+                        </div>
+                    </div>
+                )}
                 
                 {showAllocationChart && (
                     <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col">
@@ -703,8 +892,19 @@ function App() {
 
                 <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col">
                     <h2 className="text-xl font-bold text-center text-[#4A6D8C] mb-4">Innskutt kapital over tid</h2>
-                    <div className="relative h-[300px]">
-                        <Bar options={capitalChartOptions} data={investedCapitalChartData} />
+                    <div className="flex justify-start -mt-1 mb-1">
+                        <button
+                            onClick={() => setShowInvestedCapitalGraphic(v => !v)}
+                            className="text-xs px-2 py-1 rounded-md border border-[#DDDDDD] bg-white text-[#333333] hover:bg-gray-100"
+                            title={showInvestedCapitalGraphic ? 'Skjul grafikk' : 'Vis grafikk'}
+                        >
+                            {showInvestedCapitalGraphic ? 'Skjul' : 'Vis'}
+                        </button>
+                    </div>
+                    <div className={`relative ${showInvestedCapitalGraphic ? 'h-[300px]' : ''}`}>
+                        {showInvestedCapitalGraphic && (
+                            <Bar options={capitalChartOptions} data={investedCapitalChartData} />
+                        )}
                     </div>
                 </div>
 

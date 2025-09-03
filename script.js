@@ -85,10 +85,10 @@ const CHART_COLORS = {
     avkastning: '#88CCEE', // Lysere blå
     sparing: '#3388CC', // Hovedblå
     utbetaling_netto: '#005599', // Mørkere blå for uttak
-    utbetaling_skatt: '#FFD700', // Yellow for tax on events
-    event_total_color: '#CC0000', // Rød
-    renteskatt: '#FFD700', // Yellow for tax on events
-    skatt2: '#FFD700', // Yellow for tax on events
+    utbetaling_skatt: '#CC4B4B', // Behagelig rød for skatt (årlige utbetalinger)
+    event_total_color: '#66CC99', // Behagelig grønn for hendelser
+    renteskatt: '#B14444', // Behagelig rød nyanse for løpende renteskatt
+    skatt2: '#E06B6B', // Behagelig rød nyanse for skatt på hendelser
     aksjeandel: '#66CCDD', // Teal
     renteandel: '#A9BCCD', // Lys grå-blå
     innskutt_kapital: '#3388CC', // Hovedblå
@@ -248,7 +248,20 @@ const calculatePrognosis = (state) => {
             }
         });
         currentPortfolioValue += totalInflow;
-        taxFreeCapitalRemaining += totalInflow;
+        // Only increase invested capital for inflows that are explicitly opted-in
+        if (totalInflow > 0) {
+            // Sum only positive event amounts flagged to increase invested capital
+            let addToInvestedFromEvents = 0;
+            state.events.forEach(event => {
+                if (year >= event.startAar && year <= event.sluttAar) {
+                    if (event.belop > 0 && event.addToInvestedCapital !== false) {
+                        addToInvestedFromEvents += event.belop;
+                    }
+                }
+            });
+            const savingsPart = isInvestmentYear ? state.annualSavings : 0;
+            taxFreeCapitalRemaining += (savingsPart + addToInvestedFromEvents);
+        }
 
         // 4. Calculate investment growth and running bond tax
         const annualStockPercentage = annualStockPercentages[i];
@@ -378,7 +391,7 @@ const formatNumberRaw = (value) => new Intl.NumberFormat('nb-NO', { minimumFract
 // --- HELPER & CHILD COMPONENTS --- //
 const SliderInput = ({ id, label, value, min, max, step, onChange, unit, isCurrency, displayValue }) => (
     <div>
-        <label htmlFor={id} className="font-medium text-sm uppercase tracking-wider text-[#333333]/80">{label}</label>
+        <label htmlFor={id} className="typo-label text-[#333333]/80">{label}</label>
         <div className="flex items-center gap-4 mt-1">
             <input
                 type="range"
@@ -391,7 +404,7 @@ const SliderInput = ({ id, label, value, min, max, step, onChange, unit, isCurre
                 onChange={(e) => onChange(id, parseFloat(e.target.value))}
                 className="w-full h-2 bg-[#DDDDDD] rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-[#66CCDD] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white"
             />
-            <span className="font-medium text-base text-[#333333] w-32 text-right">
+            <span className="typo-paragraph text-[#333333] w-32 text-right">
                 {displayValue ?? (isCurrency ? formatCurrency(value) : `${formatNumberRaw(value)} ${unit}`)}
             </span>
         </div>
@@ -402,7 +415,7 @@ const SliderInput = ({ id, label, value, min, max, step, onChange, unit, isCurre
 
 const InvestorTypeToggle = ({ value, onChange }) => (
     <div>
-        <label className="font-medium text-sm uppercase tracking-wider text-[#333333]/80">Investor type</label>
+        <label className="typo-label text-[#333333]/80">Investor type</label>
         <div className="grid grid-cols-2 gap-2 mt-2">
             <button 
                 onClick={() => onChange('investorType', 'AS')} 
@@ -422,7 +435,7 @@ const InvestorTypeToggle = ({ value, onChange }) => (
 
 const ResetAllButton = ({ onReset }) => (
     <div>
-        <label className="font-medium text-sm uppercase tracking-wider text-[#333333]/80">Nullstill alt</label>
+        <label className="typo-label text-[#333333]/80">Nullstill alt</label>
         <div className="mt-2">
             <button 
                 onClick={onReset} 
@@ -436,7 +449,7 @@ const ResetAllButton = ({ onReset }) => (
 
 const ManualTaxInput = ({ id, label, value, onChange }) => (
     <div>
-        <label htmlFor={id} className="font-medium text-sm uppercase tracking-wider text-[#333333]/80">{label}</label>
+        <label htmlFor={id} className="typo-label text-[#333333]/80">{label}</label>
         <div className="flex items-center gap-2 mt-1">
             <input
                 type="number"
@@ -450,7 +463,7 @@ const ManualTaxInput = ({ id, label, value, onChange }) => (
                 className="flex-1 bg-white border border-[#DDDDDD] rounded-md px-3 py-2 text-[#333333] focus:outline-none focus:ring-2 focus:ring-[#66CCDD] focus:border-transparent"
                 placeholder="0.0"
             />
-            <span className="font-medium text-base text-[#333333] w-8">%</span>
+            <span className="typo-paragraph text-[#333333] w-8">%</span>
         </div>
     </div>
 );
@@ -493,11 +506,12 @@ const EventRow = ({ event, onUpdate, onRemove, maxYear }) => {
     const widthPercent = range > 0 ? ((event.sluttAar - event.startAar) / range) * 100 : 0;
 
     return (
-        <div className="grid grid-cols-12 gap-3 items-center bg-gray-50 border border-[#DDDDDD] rounded-lg p-3">
-            <div className="col-span-3">
+        <div className="bg-gray-50 border border-[#DDDDDD] rounded-lg p-3">
+            <div className="grid grid-cols-12 gap-3 items-center">
+                <div className="col-span-3">
                 <input type="text" value={event.type} onChange={(e) => onUpdate(event.id, 'type', e.target.value)} className="w-full bg-white border border-[#DDDDDD] rounded-md px-3 py-1.5 text-[#333333]" placeholder="Navn på hendelse" />
-            </div>
-            <div className="col-span-5 relative h-10 flex items-center">
+                </div>
+                <div className="col-span-5 relative h-10 flex items-center">
                 <div className="relative w-full">
                     {/* Track background */}
                     <div className="absolute w-full h-1.5 bg-[#DDDDDD] rounded-full top-1/2 -translate-y-1/2"></div>
@@ -521,14 +535,35 @@ const EventRow = ({ event, onUpdate, onRemove, maxYear }) => {
                         className="absolute w-full h-1.5 appearance-none bg-transparent m-0 z-20 pointer-events-none top-1/2 -translate-y-1/2 [&::-webkit-slider-thumb]:pointer-events-auto [&::-moz-range-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[#66CCDD] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:appearance-none" 
                     />
                 </div>
-            </div>
-            <div className="col-span-3">
-                <input type="text" value={amount} onChange={handleAmountChange} onBlur={handleAmountBlur} className="w-full bg-white border border-[#DDDDDD] rounded-md px-3 py-1.5 text-[#333333] text-right" placeholder="Beløp" />
-            </div>
-            <div className="col-span-1 flex justify-end">
+                </div>
+                <div className="col-span-3 flex items-center justify-end gap-2">
+                <input type="text" value={amount} onChange={handleAmountChange} onBlur={handleAmountBlur} className="bg-white border border-[#DDDDDD] rounded-md px-3 py-1.5 text-[#333333] text-right w-full" placeholder="Beløp" />
+                </div>
+                <div className="col-span-1 flex justify-end">
                 <button onClick={() => onRemove(event.id)} className="text-gray-400 hover:text-[#CC0000] transition-colors">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                 </button>
+                </div>
+            </div>
+            {/* Ja/Nei toggle – own row below, label on the left */}
+            <div className="flex items-center justify-end mt-2 gap-3">
+                <span className="typo-label text-[#333333]/80">Skal påvirke innskutt kapital:</span>
+                <div className="flex gap-1">
+                    <button
+                        type="button"
+                        onClick={() => onUpdate(event.id, 'addToInvestedCapital', true)}
+                        className={`${event.addToInvestedCapital ? 'bg-[#66CCDD] text-white border-[#66CCDD]' : 'bg-white text-[#333333] border-[#DDDDDD]'} px-3 py-1 text-xs font-medium rounded-full border transition-colors`}
+                    >
+                        Ja
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => onUpdate(event.id, 'addToInvestedCapital', false)}
+                        className={`${!event.addToInvestedCapital ? 'bg-[#66CCDD] text-white border-[#66CCDD]' : 'bg-white text-[#333333] border-[#DDDDDD]'} px-3 py-1 text-xs font-medium rounded-full border transition-colors`}
+                    >
+                        Nei
+                    </button>
+                </div>
             </div>
         </div>
     );
@@ -595,6 +630,8 @@ function App() {
             belop: 0,
             startAar: START_YEAR, // Default to current year
             sluttAar: START_YEAR, // Default to current year
+            // By default, positive inflows from this event increase invested capital
+            addToInvestedCapital: true,
         };
         setState(s => ({ ...s, events: [...s.events, newEvent] }));
     }, []);
@@ -677,77 +714,107 @@ function App() {
         [startValuesAllYears, stockPctAllYears]
     );
 
-    // Principal that only changes with savings/events/payouts (not by returns)
-    const principalStockSeries = useMemo(() => {
+    // Fordeling: Uttak skal først redusere avkastning, deretter hovedstol. Aksjer kan ikke bli negativ.
+    const {
+        principalStockSeries,
+        principalBondSeries,
+        stockReturnSeries,
+        bondReturnSeries,
+    } = useMemo(() => {
         const len = startValuesAllYears.length;
-        if (len === 0) return [];
-        const principal = new Array(len).fill(0);
-        principal[0] = Math.round(state.initialPortfolioSize * (stockPctAllYears[0] / 100));
+        const stockShareArr = stockPctAllYears.map(p => (p || 0) / 100);
+        const bondShareArr = stockShareArr.map(s => 1 - s);
+
+        // Inflow/outflow pr år (index matcher labelsAllYears)
         const sparing = prognosis.data.sparing;
         const events = prognosis.data.event_total;
         const netPayout = prognosis.data.nettoUtbetaling; // negative when outflow happens
-        for (let i = 1; i < len; i++) {
-            const prev = principal[i - 1];
-            const inflow = Math.max(0, sparing[i]) + Math.max(0, events[i]);
-            const outflow = (-Math.min(0, events[i])) + (-Math.min(0, netPayout[i]));
-            const stockShare = (stockPctAllYears[i] || 0) / 100;
-            principal[i] = Math.round(prev + inflow * stockShare - outflow * stockShare);
-        }
-        return principal;
-    }, [startValuesAllYears.length, state.initialPortfolioSize, stockPctAllYears, prognosis.data.sparing, prognosis.data.event_total, prognosis.data.nettoUtbetaling]);
 
-    const principalBondSeries = useMemo(() => {
-        const len = startValuesAllYears.length;
-        if (len === 0) return [];
-        const principal = new Array(len).fill(0);
-        principal[0] = Math.round(state.initialPortfolioSize * (1 - stockPctAllYears[0] / 100));
-        const sparing = prognosis.data.sparing;
-        const events = prognosis.data.event_total;
-        const netPayout = prognosis.data.nettoUtbetaling; // negative when outflow happens
-        for (let i = 1; i < len; i++) {
-            const prev = principal[i - 1];
-            const inflow = Math.max(0, sparing[i]) + Math.max(0, events[i]);
-            const outflow = (-Math.min(0, events[i])) + (-Math.min(0, netPayout[i]));
-            const bondShare = 1 - (stockPctAllYears[i] || 0) / 100;
-            principal[i] = Math.round(prev + inflow * bondShare - outflow * bondShare);
+        const inflowArr = new Array(len).fill(0);
+        const outflowArr = new Array(len).fill(0);
+        for (let i = 0; i < len; i++) {
+            inflowArr[i] = Math.max(0, (sparing[i] || 0)) + Math.max(0, (events[i] || 0));
+            outflowArr[i] = (-Math.min(0, (events[i] || 0))) + (-Math.min(0, (netPayout[i] || 0)));
         }
-        return principal;
-    }, [startValuesAllYears.length, state.initialPortfolioSize, stockPctAllYears, prognosis.data.sparing, prognosis.data.event_total, prognosis.data.nettoUtbetaling]);
-    // Årlige bruttoavkastninger per år
-    const aksjeAvkastningAnnual = useMemo(
-        () => startOfYearStockValues.map((v, i) => i === 0 ? 0 : Math.round(v * (state.stockReturnRate / 100))),
-        [startOfYearStockValues, state.stockReturnRate]
-    );
-    const renteAvkastningAnnual = useMemo(
-        () => startOfYearBondValues.map((v, i) => i === 0 ? 0 : Math.round(v * (state.bondReturnRate / 100))),
-        [startOfYearBondValues, state.bondReturnRate]
-    );
 
-    // Akkumulert avkastning siden start for hvert år
-    const aksjeAvkastningCumulative = useMemo(() => {
-        const out = new Array(aksjeAvkastningAnnual.length).fill(0);
-        for (let i = 1; i < aksjeAvkastningAnnual.length; i++) {
-            out[i] = out[i - 1] + aksjeAvkastningAnnual[i];
+        // Årlig bruttoavkastning pr aktivaklasse (samme metode som øvrig grafikk)
+        const aksjeAvkastningAnnual = startOfYearStockValues.map((v, i) => i === 0 ? 0 : Math.round(v * (state.stockReturnRate / 100)));
+        const renteAvkastningAnnual = startOfYearBondValues.map((v, i) => i === 0 ? 0 : Math.round(v * (state.bondReturnRate / 100)));
+
+        // Tilstand over tid
+        const stockPrincipal = new Array(len).fill(0);
+        const bondPrincipal = new Array(len).fill(0);
+        const stockReturn = new Array(len).fill(0);
+        const bondReturn = new Array(len).fill(0);
+
+        // Startverdier (første rad = 'start')
+        stockPrincipal[0] = Math.round(state.initialPortfolioSize * stockShareArr[0]);
+        bondPrincipal[0] = Math.round(state.initialPortfolioSize * bondShareArr[0]);
+        stockReturn[0] = 0;
+        bondReturn[0] = 0;
+
+        // Hjelper for proporsjonal fordeling fra to "bøtter"
+        const allocateFromTwo = (amount, aAvail, bAvail) => {
+            const totalAvail = aAvail + bAvail;
+            if (amount <= 0 || totalAvail <= 0) return [0, 0];
+            if (amount >= totalAvail) return [aAvail, bAvail];
+            let aTake = (aAvail / totalAvail) * amount;
+            if (aTake > aAvail) aTake = aAvail;
+            let bTake = amount - aTake;
+            if (bTake > bAvail) {
+                bTake = bAvail;
+                aTake = amount - bTake;
+            }
+            return [aTake, bTake];
+        };
+
+        for (let i = 1; i < len; i++) {
+            // 1) Legg til årlig bruttoavkastning på eksisterende avkastning
+            let sRet = stockReturn[i - 1] + (aksjeAvkastningAnnual[i] || 0);
+            let bRet = bondReturn[i - 1] + (renteAvkastningAnnual[i] || 0);
+
+            // 2) Legg til innskudd (inflow) i hovedstol iht. årets fordeling
+            let sPrin = stockPrincipal[i - 1] + (inflowArr[i] * stockShareArr[i]);
+            let bPrin = bondPrincipal[i - 1] + (inflowArr[i] * bondShareArr[i]);
+
+            // 3) Trekk ut uttak: først fra avkastning, deretter fra hovedstol
+            const totalOut = outflowArr[i];
+            // Fra avkastning først
+            const [takeFromSRet, takeFromBRet] = allocateFromTwo(totalOut, sRet, bRet);
+            sRet -= takeFromSRet;
+            bRet -= takeFromBRet;
+            let remainder = totalOut - (takeFromSRet + takeFromBRet);
+
+            if (remainder > 0) {
+                // Deretter fra hovedstol (kan ikke bli negativ)
+                const [takeFromSPrin, takeFromBPrin] = allocateFromTwo(remainder, sPrin, bPrin);
+                sPrin = Math.max(0, sPrin - takeFromSPrin);
+                bPrin = Math.max(0, bPrin - takeFromBPrin);
+            }
+
+            stockReturn[i] = Math.round(Math.max(0, sRet));
+            bondReturn[i] = Math.round(Math.max(0, bRet));
+            stockPrincipal[i] = Math.round(Math.max(0, sPrin));
+            bondPrincipal[i] = Math.round(Math.max(0, bPrin));
         }
-        return out;
-    }, [aksjeAvkastningAnnual]);
-    const renteAvkastningCumulative = useMemo(() => {
-        const out = new Array(renteAvkastningAnnual.length).fill(0);
-        for (let i = 1; i < renteAvkastningAnnual.length; i++) {
-            out[i] = out[i - 1] + renteAvkastningAnnual[i];
-        }
-        return out;
-    }, [renteAvkastningAnnual]);
+
+        return {
+            principalStockSeries: stockPrincipal,
+            principalBondSeries: bondPrincipal,
+            stockReturnSeries: stockReturn,
+            bondReturnSeries: bondReturn,
+        };
+    }, [startValuesAllYears.length, stockPctAllYears, prognosis.data.sparing, prognosis.data.event_total, prognosis.data.nettoUtbetaling, startOfYearStockValues, startOfYearBondValues, state.stockReturnRate, state.bondReturnRate, state.initialPortfolioSize]);
 
     const stackedAllYearsData = useMemo(() => ({
         labels: labelsAllYears,
         datasets: [
             { label: 'Aksjer', data: principalStockSeries, backgroundColor: CHART_COLORS.aksjer_principal, stack: 'allYears' },
-            { label: 'Aksjeavkastning', data: aksjeAvkastningCumulative, backgroundColor: CHART_COLORS.aksjer_avkastning, stack: 'allYears' },
+            { label: 'Aksjeavkastning', data: stockReturnSeries, backgroundColor: CHART_COLORS.aksjer_avkastning, stack: 'allYears' },
             { label: 'Renter', data: principalBondSeries, backgroundColor: CHART_COLORS.renter_principal, stack: 'allYears' },
-            { label: 'Renteavkastning', data: renteAvkastningCumulative, backgroundColor: CHART_COLORS.renter_avkastning, stack: 'allYears' },
+            { label: 'Renteavkastning', data: bondReturnSeries, backgroundColor: CHART_COLORS.renter_avkastning, stack: 'allYears' },
         ],
-    }), [labelsAllYears, principalStockSeries, aksjeAvkastningCumulative, principalBondSeries, renteAvkastningCumulative]);
+    }), [labelsAllYears, principalStockSeries, stockReturnSeries, principalBondSeries, bondReturnSeries]);
 
     const stackedAllYearsOptions = useMemo(() => ({
         ...chartOptions,
@@ -766,7 +833,7 @@ function App() {
             <div className="w-full max-w-[1840px] flex flex-col gap-6">
 
                 <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col">
-                    <h1 className="text-3xl md:text-4xl font-bold text-center text-[#4A6D8C] mb-4">Mål og behov</h1>
+                    <h1 className="typo-h1 text-center text-[#4A6D8C] mb-4">Mål og behov</h1>
                     <div className="relative h-[500px]">
                         <button
                             onClick={() => setShowDisclaimer(true)}
@@ -779,7 +846,7 @@ function App() {
                     </div>
                     <CustomLegend items={LEGEND_DATA} />
                     <div className="mt-6 border border-[#DDDDDD] rounded-xl p-4">
-                        <h2 className="text-xl font-bold text-center text-[#4A6D8C] mb-4">Fordeling mellom aksjer og renter</h2>
+                        <h2 className="typo-h2 text-center text-[#4A6D8C] mb-4">Fordeling mellom aksjer og renter</h2>
                         <div className="flex justify-start -mt-1 mb-1">
                             <button
                                 onClick={() => setShowDistributionGraphic(v => !v)}
@@ -813,27 +880,32 @@ function App() {
                             >
                                 ✕
                             </button>
-                            <h3 className="text-lg font-semibold text-[#4A6D8C] mb-3">Disclaimer/forutsetninger</h3>
-                            <div className="text-base text-[#333333]/90 leading-8 whitespace-pre-wrap break-words px-1">
+                            <h3 className="typo-h3 text-[#4A6D8C] mb-3">Disclaimer/forutsetninger</h3>
+                            <div className="typo-paragraph text-[#333333]/90 leading-8 whitespace-pre-wrap break-words px-1">
                                 {(() => {
-                                    const t = `Dette er en investeringsberegning som kun er ment som en illustrasjon. Simulert avkastning er ikke basert på reelle tall. Alle skatteberegninger kan være feil, og det er viktig å gjøre egne undersøkelser knyttet til skatt.
+                                    const t = `Disclaimer / forutsetninger
+                                
 
-Simuleringen skiller mellom privatpersoner og AS. Forskjellen ligger i beskatning av uttak.
 
-I hovedsak vil all skatt alltid defineres som betalbar skatt i påfølgende år. Ett uttak i f.eks år 2026, vil derfor føre til en skatteregning i år 2027 osv.
 
-Privat:
-For en privatperson vil innskutt kapital kun være knyttet til aksjedelen av porteføljen. Uttak vil derfor fordeles mellom aksjer og renter iht aksjeandelen. Om det er innskutt kapital i porteføljen, vil alle aksjeuttak fortrinnsvis hentes ut skattefritt. Når innskutt kapital er gått til null, vil alle aksjeuttak beskattes med 37,8%. Uttak fra renteporteføljen beskattes årlig, og uttak fra renteporteføljen er derfor ferdig beskattede midler det året de tas ut.
+Resultatet av de beregninger som gjøres i kalkulatoren vil variere ut ifra hvilke tall som legges til grunn. Tallene som legges til grunn bestemmes i samtale mellom rådgiver og deltaker i møtet. Resultatet vil dermed kunne variere fra de tallene som fremkommer offisielle dokumenter i tilknytning til ytelse av investeringsrådgivning.
 
-Modellen forutsetter ingen utsatt skatt på renter. Løpende renteavkastning beskattes fortløpende hvert år, for både privat og AS.
+Beregningene i kalkulatoren må ansees som statiske og er kun ment for illustrasjonsformål. For konkrete fremstillinger, vises det til offisielle dokumenter knyttet til rådgivningen.
 
-AS:
+Forklaring:
 
-Alle uttak fra et as vil i modellen ansees som et utbytte. Om det er innskutt kapital i porteføljen, vil alle uttak hentes ut skattefritt. Alle uttak utover innskutt kapital vil beskattes med 37,8% i påfølgende år (se eksempel over).
+Simuleringen skiller mellom privatpersoner og AS. Forskjellen ligger i beskatning av uttak. 
+I hovedsak vil all skatt alltid defineres som betalbar skatt i påfølgende år. Ett uttak i f.eks år 2026, vil derfor føre til en skatteregning i år 2027 osv. 
+Privat: For en privatperson vil innskutt kapital kun være knyttet til aksjedelen av porteføljen. Uttak vil derfor fordeles mellom aksjer og renter iht aksjeandelen. Om det er innskutt kapital i porteføljen, vil alle aksjeuttak fortrinnsvis hentes ut skattefritt. Når innskutt kapital er gått til null, vil alle aksjeuttak beskattes med 37,8%. 
+Uttak fra renteporteføljen beskattes årlig, og uttak fra renteporteføljen er derfor ferdig beskattede midler det året de tas ut. Modellen forutsetter ingen utsatt skatt på renter. Løpende renteavkastning beskattes fortløpende hvert år, for både privat og AS. AS: 
+Hendelser:
+Alle innskudd vil i utgangspunktet øke den innskutte kapitalen tilsvarende.
+Om dette ikke er tilfellet velger du alternativet : nei, i selve hendelsen.
+Eksempel: Et AS har solgt en eiendel som øker likviditeten i selskapet, men den innskutte kapitalen i selskapet har ikke endret seg.
 
-Ønsket årlig utbetaling:
-Summen som legges inn her er et nettobeløp. I den grad det er mulig vil modellen alltid utbetale dette beløpet etter skatt. Beløpet vil derfor med tiden øke. Dette fordi modellen tar hensyn til at det årlige uttaket må være større grunnet skatteregningen knyttet til uttaket.`;
-                                    return t.replace(/\.\s+/g, '.\n\n');
+Alle uttak fra et as vil i modellen ansees som et utbytte. Om det er innskutt kapital i porteføljen, vil alle uttak hentes ut skattefritt. Alle uttak utover innskutt kapital vil beskattes med 37,8% i påfølgende år (se eksempel over). 
+Ønsket årlig utbetaling: Summen som legges inn her er et nettobeløp. I den grad det er mulig vil modellen alltid utbetale dette beløpet etter skatt. Beløpet vil derfor med tiden øke. Dette fordi modellen tar hensyn til at det årlige uttaket må være større grunnet skatteregningen knyttet til uttaket.`;
+                                    return t;
                                 })()}
                             </div>
                         </div>
@@ -842,7 +914,7 @@ Summen som legges inn her er et nettobeløp. I den grad det er mulig vil modelle
                 
                 {showAllocationChart && (
                     <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col">
-                         <h2 className="text-xl font-bold text-center text-[#4A6D8C] mb-4">Aksjeandel over tid</h2>
+                         <h2 className="typo-h2 text-center text-[#4A6D8C] mb-4">Aksjeandel over tid</h2>
                         <div className="relative h-[300px]">
                            <Line options={allocationChartOptions} data={allocationChartData} />
                         </div>
@@ -850,7 +922,7 @@ Summen som legges inn her er et nettobeløp. I den grad det er mulig vil modelle
                 )}
 
                 <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col">
-                    <h2 className="text-xl font-bold text-center text-[#4A6D8C] mb-4">Innskutt kapital over tid</h2>
+                    <h2 className="typo-h2 text-center text-[#4A6D8C] mb-4">Innskutt kapital over tid</h2>
                     <div className="flex justify-start -mt-1 mb-1">
                         <button
                             onClick={() => setShowInvestedCapitalGraphic(v => !v)}
@@ -870,8 +942,8 @@ Summen som legges inn her er et nettobeløp. I den grad det er mulig vil modelle
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
                     {/* Assumptions Panel */}
                     <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col gap-6">
-                        <h2 className="text-2xl font-bold text-[#4A6D8C]">Forutsetninger</h2>
-                        <SliderInput id="initialPortfolioSize" label="Porteføljestørrelse (NOK)" value={state.initialPortfolioSize} min={2500000} max={150000000} step={500000} onChange={handleStateChange} isCurrency />
+                        <h2 className="typo-h2 text-[#4A6D8C]">Forutsetninger</h2>
+                        <SliderInput id="initialPortfolioSize" label="Porteføljestørrelse (NOK)" value={state.initialPortfolioSize} min={2500000} max={100000000} step={500000} onChange={handleStateChange} isCurrency />
                         <SliderInput id="investedCapital" label="Innskutt kapital (skattefri) (NOK)" value={state.investedCapital} min={0} max={state.initialPortfolioSize} step={100000} onChange={handleStateChange} isCurrency />
                         <SliderInput id="investmentYears" label="Antall år investeringsperiode" value={state.investmentYears} min={1} max={30} step={1} onChange={handleStateChange} unit="år" />
                         <SliderInput id="payoutYears" label="Antall år med utbetaling" value={state.payoutYears} min={0} max={30} step={1} onChange={handleStateChange} unit="år" />
@@ -882,7 +954,7 @@ Summen som legges inn her er et nettobeløp. I den grad det er mulig vil modelle
                          
                          {/* Ønsket årlig utbetaling - flyttet ned under Nullstill alt */}
                          <div>
-                             <h3 className="text-2xl font-bold text-[#4A6D8C] mb-4">Ønsket årlig utbetaling</h3>
+                             <h3 className="typo-h2 text-[#4A6D8C] mb-4">Ønsket årlig utbetaling</h3>
                              <div className="mt-4 space-y-4">
                                  <SliderInput 
                                      id="desiredAnnualConsumptionPayout" 
@@ -905,7 +977,7 @@ Summen som legges inn her er et nettobeløp. I den grad det er mulig vil modelle
                                      isCurrency 
                                  />
                                  <div className="bg-gray-50 border border-[#DDDDDD] rounded-lg p-3">
-                                     <div className="text-sm text-[#333333]/70 mb-1">Sum ønsket årlig utbetaling (etter skatt):</div>
+                                     <div className="typo-label text-[#333333]/70 mb-1">Sum ønsket årlig utbetaling (etter skatt):</div>
                                      <div className="text-lg font-semibold text-[#4A6D8C]">
                                          {formatCurrency(state.desiredAnnualConsumptionPayout + state.desiredAnnualWealthTaxPayout)}
                                      </div>
@@ -916,10 +988,10 @@ Summen som legges inn her er et nettobeløp. I den grad det er mulig vil modelle
 
                     {/* Parameters Panel */}
                     <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col gap-6">
-                        <h2 className="text-2xl font-bold text-[#4A6D8C]">Parametere</h2>
+                        <h2 className="typo-h2 text-[#4A6D8C]">Parametere</h2>
                         
                         <div>
-                            <label className="font-medium text-sm uppercase tracking-wider text-[#333333]/80">Aksjeandel første år (%)</label>
+                            <label className="typo-label text-[#333333]/80">Aksjeandel første år (%)</label>
                             <div className="grid grid-cols-4 gap-2 mt-2">
                                 {STOCK_ALLOCATION_OPTIONS.map(opt => (
                                     <button key={opt.value} onClick={() => handleStateChange('initialStockAllocation', opt.value)} className={`aspect-square rounded-lg flex items-center justify-center text-center p-1 font-medium transition-all transform hover:-translate-y-0.5 ${state.initialStockAllocation === opt.value ? 'bg-[#66CCDD] text-white shadow-lg' : 'bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100'}`}>
@@ -930,7 +1002,7 @@ Summen som legges inn her er et nettobeløp. I den grad det er mulig vil modelle
                         </div>
 
                         <div>
-                            <label className="font-medium text-sm uppercase tracking-wider text-[#333333]/80">Aksjeandel nedtrapping</label>
+                            <label className="typo-label text-[#333333]/80">Aksjeandel nedtrapping</label>
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
                                 {TAPERING_OPTIONS.map(opt => (
                                     <button key={opt.id} onClick={() => handleTaperingChange(opt.value)} className={`p-3 rounded-lg flex flex-col items-center justify-center text-center font-medium transition-all transform hover:-translate-y-0.5 ${state.taperingOption === opt.value ? 'bg-[#66CCDD] text-white shadow-lg' : 'bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100'}`}>
@@ -941,12 +1013,12 @@ Summen som legges inn her er et nettobeløp. I den grad det er mulig vil modelle
                             </div>
                         </div>
 
-                        <SliderInput id="stockReturnRate" label="Forventet avkastning aksjer" value={state.stockReturnRate} min={6} max={12} step={0.1} onChange={handleStateChange} displayValue={`${state.stockReturnRate.toFixed(1)}%`} />
+                        <SliderInput id="stockReturnRate" label="Forventet avkastning aksjer" value={state.stockReturnRate} min={5} max={10} step={0.1} onChange={handleStateChange} displayValue={`${state.stockReturnRate.toFixed(1)}%`} />
                         <SliderInput id="bondReturnRate" label="Forventet avkastning renter" value={state.bondReturnRate} min={3} max={9} step={0.1} onChange={handleStateChange} displayValue={`${state.bondReturnRate.toFixed(1)}%`} />
                         
                         {/* Forventet avkastning felt */}
                         <div>
-                            <label className="font-medium text-sm uppercase tracking-wider text-[#333333]/80">Forventet avkastning</label>
+                            <label className="typo-label text-[#333333]/80">Forventet avkastning</label>
                             <div className="bg-gray-50 border border-[#DDDDDD] rounded-lg p-3 mt-1">
                                 <div className="text-lg font-semibold text-[#4A6D8C]">
                                     {(() => {
@@ -961,7 +1033,7 @@ Summen som legges inn her er et nettobeløp. I den grad det er mulig vil modelle
                         
                         {/* Skatt seksjon */}
                         <div className="mt-4">
-                            <h3 className="text-2xl font-bold text-[#4A6D8C] mb-4">Skatt</h3>
+                            <h3 className="typo-h2 text-[#4A6D8C] mb-4">Skatt</h3>
                             <div className="space-y-4">
                                 <SliderInput id="shieldingRate" label="Skjermingsrente" value={state.shieldingRate} min={2} max={7} step={0.1} onChange={handleStateChange} displayValue={`${state.shieldingRate.toFixed(1)}%`} />
                                 <ManualTaxInput id="manualStockTaxRate" label="Utbytteskatt / skatt aksjer (%)" value={state.manualStockTaxRate} onChange={handleStateChange} />
@@ -973,7 +1045,7 @@ Summen som legges inn her er et nettobeløp. I den grad det er mulig vil modelle
                     {/* Events Panel - Moved to bottom left */}
                     <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col gap-6">
                         <div className="flex justify-between items-center">
-                            <h2 className="text-2xl font-bold text-[#4A6D8C]">Hendelser</h2>
+                            <h2 className="typo-h2 text-[#4A6D8C]">Hendelser</h2>
                             <button onClick={handleAddEvent} className="flex items-center gap-2 bg-[#3388CC] hover:bg-[#005599] text-white font-medium py-2 px-4 rounded-lg transition-all transform hover:-translate-y-0.5 shadow-md">
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
                                 <span>Legg til hendelse</span>
@@ -1004,4 +1076,3 @@ root.render(
         <App />
     </React.StrictMode>
 ); 
-

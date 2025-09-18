@@ -98,6 +98,9 @@ const CHART_COLORS = {
     renter_avkastning: '#D1DCE7' // Renteavkastning – lys grå-blå
 };
 
+// Maks antall hendelser som kan legges til
+const MAX_EVENTS = 4;
+
 const LEGEND_DATA = [
     { label: 'Hovedstol', color: CHART_COLORS.hovedstol },
     { label: 'Avkastning', color: CHART_COLORS.avkastning },
@@ -130,6 +133,7 @@ const INITIAL_APP_STATE = {
     manualStockTaxRate: 37.8, // Ny state for manuell aksjebeskatning
     desiredAnnualConsumptionPayout: 800000, // Ny state for ønsket årlig uttak til forbruk
     desiredAnnualWealthTaxPayout: 200000, // Ny state for ønsket årlig uttak til formuesskatt
+    kpiRate: 0.0, // Ny slider for forventet KPI
 };
 
 const STOCK_ALLOCATION_OPTIONS = [
@@ -659,16 +663,20 @@ function App() {
     };
 
     const handleAddEvent = useCallback(() => {
-        const newEvent = {
-            id: `event-${Date.now()}`,
-            type: 'Uttak',
-            belop: 0,
-            startAar: START_YEAR, // Default to current year
-            sluttAar: START_YEAR, // Default to current year
-            // By default, positive inflows from this event increase invested capital
-            addToInvestedCapital: true,
-        };
-        setState(s => ({ ...s, events: [...s.events, newEvent] }));
+        setState(s => {
+            const currentCount = s.events ? s.events.length : 0;
+            if (currentCount >= MAX_EVENTS) return s;
+            const newEvent = {
+                id: `event-${Date.now()}`,
+                type: 'Uttak',
+                belop: 0,
+                startAar: START_YEAR, // Default to current year
+                sluttAar: START_YEAR, // Default to current year
+                // By default, positive inflows from this event increase invested capital
+                addToInvestedCapital: true,
+            };
+            return { ...s, events: [...s.events, newEvent] };
+        });
     }, []);
 
     const handleUpdateEvent = useCallback((id, key, value) => {
@@ -988,11 +996,8 @@ Alle uttak fra et as vil i modellen ansees som et utbytte. Om det er innskutt ka
                         <SliderInput id="payoutYears" label="Antall år med utbetaling" value={state.payoutYears} min={0} max={30} step={1} onChange={handleStateChange} unit="år" />
                        
                          <SliderInput id="annualSavings" label="Årlig sparing (NOK)" value={state.annualSavings} min={0} max={1200000} step={10000} onChange={handleStateChange} isCurrency />
-                         <InvestorTypeToggle value={state.investorType} onChange={handleStateChange} />
-                         <TaxCalculationToggle value={state.taxCalculationEnabled} onChange={handleStateChange} />
-                         <ResetAllButton onReset={handleResetAll} />
                          
-                         {/* Ønsket årlig utbetaling - flyttet ned under Nullstill alt */}
+                         {/* Ønsket årlig utbetaling */}
                          <div>
                              <h3 className="typo-h2 text-[#4A6D8C] mb-4">Ønsket årlig utbetaling</h3>
                              <div className="mt-4 space-y-4">
@@ -1041,30 +1046,22 @@ Alle uttak fra et as vil i modellen ansees som et utbytte. Om det er innskutt ka
                             </div>
                         </div>
 
-                        <div>
-                            <label className="typo-label text-[#333333]/80">Aksjeandel nedtrapping</label>
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
-                                {TAPERING_OPTIONS.map(opt => (
-                                    <button key={opt.id} onClick={() => handleTaperingChange(opt.value)} className={`p-3 rounded-lg flex flex-col items-center justify-center text-center font-medium transition-all transform hover:-translate-y-0.5 ${state.taperingOption === opt.value ? 'bg-[#66CCDD] text-white shadow-lg' : 'bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100'}`}>
-                                        <span>{opt.label}</span>
-                                        <span className="text-xs text-[#333333]/70">{opt.sublabel}</span>
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                        <SliderInput id="stockReturnRate" label="Forventet avkastning aksjer" value={state.stockReturnRate} min={5} max={10} step={0.1} onChange={handleStateChange} displayValue={`${state.stockReturnRate.toFixed(1)}%`} />
-                        <SliderInput id="bondReturnRate" label="Forventet avkastning renter" value={state.bondReturnRate} min={3} max={9} step={0.1} onChange={handleStateChange} displayValue={`${state.bondReturnRate.toFixed(1)}%`} />
                         
-                        {/* Forventet avkastning felt */}
-                        <div>
-                            <label className="typo-label text-[#333333]/80">Forventet avkastning</label>
+
+                        <div className="mt-4">
+                            <h3 className="typo-h2 text-[#4A6D8C] mb-4">Forventet avkastning</h3>
+                            <SliderInput id="stockReturnRate" label="Forventet avkastning aksjer" value={state.stockReturnRate} min={5} max={10} step={0.1} onChange={handleStateChange} displayValue={`${state.stockReturnRate.toFixed(1)}%`} />
+                            <SliderInput id="bondReturnRate" label="Forventet avkastning renter" value={state.bondReturnRate} min={3} max={9} step={0.1} onChange={handleStateChange} displayValue={`${state.bondReturnRate.toFixed(1)}%`} />
+                            <SliderInput id="kpiRate" label="Forventet KPI" value={state.kpiRate} min={0} max={5} step={0.1} onChange={handleStateChange} displayValue={`${state.kpiRate.toFixed(1)}%`} />
+
+                            {/* Forventet avkastning felt */}
                             <div className="bg-gray-50 border border-[#DDDDDD] rounded-lg p-3 mt-1">
+                                <div className="typo-label text-[#333333]/70 mb-1">Forventet avkastning:</div>
                                 <div className="text-lg font-semibold text-[#4A6D8C]">
                                     {(() => {
                                         const stockAllocation = state.initialStockAllocation / 100;
                                         const bondAllocation = (100 - state.initialStockAllocation) / 100;
-                                        const weightedReturn = (stockAllocation * state.stockReturnRate) + (bondAllocation * state.bondReturnRate);
+                                        const weightedReturn = (stockAllocation * state.stockReturnRate) + (bondAllocation * state.bondReturnRate) - state.kpiRate;
                                         return `${weightedReturn.toFixed(1)}%`;
                                     })()}
                                 </div>
@@ -1082,20 +1079,45 @@ Alle uttak fra et as vil i modellen ansees som et utbytte. Om det er innskutt ka
                         </div>
                     </div>
 
-                    {/* Events Panel - Moved to bottom left */}
+                    {/* Events Panel - fixed 4-slot area with controls below */}
                     <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col gap-6">
                         <div className="flex justify-between items-center">
                             <h2 className="typo-h2 text-[#4A6D8C]">Hendelser</h2>
-                            <button onClick={handleAddEvent} className="flex items-center gap-2 bg-[#3388CC] hover:bg-[#005599] text-white font-medium py-2 px-4 rounded-lg transition-all transform hover:-translate-y-0.5 shadow-md">
+                            <button onClick={handleAddEvent} disabled={(state.events?.length || 0) >= MAX_EVENTS} className={`flex items-center gap-2 font-medium py-2 px-4 rounded-lg transition-all transform hover:-translate-y-0.5 shadow-md ${((state.events?.length || 0) >= MAX_EVENTS) ? 'bg-gray-300 text-white cursor-not-allowed' : 'bg-[#3388CC] hover:bg-[#005599] text-white'}`}>
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
                                 <span>Legg til hendelse</span>
                             </button>
                         </div>
                         
                         <div className="space-y-3 mt-4">
-                            {state.events.map(event => (
+                            {(state.events.slice(0, MAX_EVENTS)).map(event => (
                                 <EventRow key={event.id} event={event} onUpdate={handleUpdateEvent} onRemove={handleRemoveEvent} maxYear={maxEventYear} />
                             ))}
+                            {Array.from({ length: Math.max(0, MAX_EVENTS - (state.events?.length || 0)) }).map((_, idx) => (
+                                <div key={`placeholder-${idx}`} className="bg-white border border-dashed border-[#DDDDDD] rounded-lg p-4 flex items-center justify-between">
+                                    <div className="text-[#333333]/60">Tom plass for hendelse</div>
+                                    <button onClick={handleAddEvent} disabled={(state.events?.length || 0) >= MAX_EVENTS} className={`px-3 py-1 rounded-md text-sm font-medium ${((state.events?.length || 0) >= MAX_EVENTS) ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-[#3388CC] text-white hover:bg-[#005599]'}`}>
+                                        Legg til
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="pt-2 border-t border-[#EEEEEE] space-y-4">
+                            <InvestorTypeToggle value={state.investorType} onChange={handleStateChange} />
+                            <TaxCalculationToggle value={state.taxCalculationEnabled} onChange={handleStateChange} />
+                            <ResetAllButton onReset={handleResetAll} />
+                            <div>
+                                <label className="typo-label text-[#333333]/80">Aksjeandel nedtrapping</label>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
+                                    {TAPERING_OPTIONS.map(opt => (
+                                        <button key={opt.id} onClick={() => handleTaperingChange(opt.value)} className={`p-3 rounded-lg flex flex-col items-center justify-center text-center font-medium transition-all transform hover:-translate-y-0.5 ${state.taperingOption === opt.value ? 'bg-[#66CCDD] text-white shadow-lg' : 'bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100'}`}>
+                                            <span>{opt.label}</span>
+                                            <span className="text-xs text-[#333333]/70">{opt.sublabel}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1116,4 +1138,3 @@ root.render(
         <App />
     </React.StrictMode>
 ); 
-

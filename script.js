@@ -134,6 +134,7 @@ const INITIAL_APP_STATE = {
     desiredAnnualConsumptionPayout: 800000, // Ny state for ønsket årlig uttak til forbruk
     desiredAnnualWealthTaxPayout: 200000, // Ny state for ønsket årlig uttak til formuesskatt
     kpiRate: 0.0, // Ny slider for forventet KPI
+    deferredInterestTax: false, // Utsatt skatt på renter (kun Privat)
 };
 
 const STOCK_ALLOCATION_OPTIONS = [
@@ -194,6 +195,7 @@ const calculatePrognosis = (state) => {
     let taxFreeCapitalRemaining = state.investedCapital;
     let deferredEventTax = 0; // Tax from an event to be paid NEXT year.
     let deferredBondTax = 0; // Bond tax to be paid NEXT year (when using deferred mode)
+    let untaxedBondReturnPool = 0; // Akkumulerte ubeskattede rentegevinster (Privat + utsatt rente-skatt)
 
     const taxesEnabled = state.taxCalculationEnabled !== false;
     const stockReturnRate = state.stockReturnRate / 100;
@@ -276,7 +278,7 @@ const calculatePrognosis = (state) => {
         const annualStockPercentage = annualStockPercentages[i];
         const annualBondPercentage = 100 - annualStockPercentage;
         let totalGrossReturn = 0;
-        let annualBondTaxAmount = 0; // Bond tax paid for the CURRENT year
+        let annualBondTaxAmount = 0; // Bond tax paid for the CURRENT year (ikke utsatt)
 
         if (currentPortfolioValue > 0) {
             const stockValue = currentPortfolioValue * (annualStockPercentage / 100);
@@ -285,10 +287,17 @@ const calculatePrognosis = (state) => {
             const grossBondReturn = bondValue * bondReturnRate;
             totalGrossReturn = grossStockReturn + grossBondReturn;
             
-            // Always pay bond tax immediately this year (no deferred tax on interest) if enabled
-            annualBondTaxAmount = taxesEnabled ? (grossBondReturn * bondTaxRate) : 0;
-            
-            currentPortfolioValue += totalGrossReturn - annualBondTaxAmount;
+            // Utsatt rente-skatt: Ikke betal løpende renteskatt; legg i pool og skatt neste år ved uttak (gjelder både Privat og AS når aktivert)
+            const useDeferredBondTax = taxesEnabled && state.deferredInterestTax === true;
+            if (useDeferredBondTax) {
+                untaxedBondReturnPool += grossBondReturn;
+                annualBondTaxAmount = 0; // ingen direkte skatt i år
+                currentPortfolioValue += totalGrossReturn; // ingen skatt trekkes nå
+            } else {
+                // Standard: betal løpende renteskatt samme år
+                annualBondTaxAmount = taxesEnabled ? (grossBondReturn * bondTaxRate) : 0;
+                currentPortfolioValue += totalGrossReturn - annualBondTaxAmount;
+            }
         }
 
         // 5. Handle outflows and calculate taxes
@@ -298,7 +307,7 @@ const calculatePrognosis = (state) => {
         // 5a. Regular annual payouts (taxed in the same year)
         const isOrdinaryPayoutYear = (i >= state.investmentYears);
         const totalDesiredPayout = state.desiredAnnualConsumptionPayout + state.desiredAnnualWealthTaxPayout;
-        if (isOrdinaryPayoutYear && totalDesiredPayout > 0) {
+            if (isOrdinaryPayoutYear && totalDesiredPayout > 0) {
             let desiredNet = totalDesiredPayout;
             const stockShare = (annualStockPercentage / 100);
             const bondShare = 1 - stockShare;
@@ -321,19 +330,41 @@ const calculatePrognosis = (state) => {
                 
                 if (taxesEnabled) {
                     if (state.investorType === 'AS') {
-                        // AS: All withdrawals taxed as dividends (37.8%) regardless of allocation
-                        const totalTax = remainingDesiredNet * taxRate;
-                        grossNeededFromTaxable = remainingDesiredNet + totalTax;
-                        annualWithdrawalTaxAmount += totalTax;
+                        // AS: Defer utbytteskatt til neste år
+                        const dividendTax = remainingDesiredNet * taxRate;
+                        // Utsatt kapitalskatt på renter (proporsjonal realisering av ubeskattet rentegevinst)
+                        let bondDeferredTax = 0;
+                        if (state.deferredInterestTax === true) {
+                            const grossFromTaxable = remainingDesiredNet; // bruttouttak før skatt (skatt tas neste år)
+                            const grossFromBond = grossFromTaxable * bondShare;
+                            const bondValueNow = currentPortfolioValue * bondShare; // etter avkastning, før uttak
+                            const fractionOfBondPortfolio = bondValueNow > 0 ? (grossFromBond / bondValueNow) : 0;
+                            const realizedUntaxedBondReturn = Math.min(untaxedBondReturnPool, untaxedBondReturnPool * fractionOfBondPortfolio);
+                            untaxedBondReturnPool -= realizedUntaxedBondReturn;
+                            bondDeferredTax = realizedUntaxedBondReturn * bondTaxRate;
+                        }
+                        grossNeededFromTaxable = remainingDesiredNet;
+                        deferredEventTax += dividendTax;
+                        deferredBondTax += bondDeferredTax;
                     } else {
-                        // Privat without deferred bond tax: only tax the leftover stock portion since bond tax is already paid
+                        // Privat: Deferer aksjeskatt + ev. kapitalskatt på ubeskattede renter proporsjonalt
                         const totalStockPortionNet = desiredNet * stockShare;
                         const stockLeftoverNet = Math.max(0, totalStockPortionNet - fromTaxFree);
                         const stockTax = stockLeftoverNet * taxRate;
-                        const totalTax = stockTax; // No bond tax here
-                        
-                        grossNeededFromTaxable = remainingDesiredNet + totalTax;
-                        annualWithdrawalTaxAmount += totalTax;
+                        let bondDeferredTax = 0;
+                        if (state.deferredInterestTax === true) {
+                            const grossFromTaxable = remainingDesiredNet;
+                            const grossFromBond = grossFromTaxable * bondShare;
+                            const bondValueNow = currentPortfolioValue * bondShare; // etter avkastning, før uttak
+                            const fractionOfBondPortfolio = bondValueNow > 0 ? (grossFromBond / bondValueNow) : 0;
+                            const realizedUntaxedBondReturn = Math.min(untaxedBondReturnPool, untaxedBondReturnPool * fractionOfBondPortfolio);
+                            untaxedBondReturnPool -= realizedUntaxedBondReturn;
+                            bondDeferredTax = realizedUntaxedBondReturn * bondTaxRate;
+                        }
+                        const totalTax = stockTax + bondDeferredTax;
+                        grossNeededFromTaxable = remainingDesiredNet;
+                        deferredEventTax += stockTax; // aksjeskatt
+                        deferredBondTax += bondDeferredTax; // kapitalskatt på renter
                     }
                 } else {
                     // No taxes: withdraw exactly the remaining desired net
@@ -349,9 +380,8 @@ const calculatePrognosis = (state) => {
         // 5b. Event withdrawals (tax is DEFERRED to next year)
         if (eventWithdrawal < 0) {
             const withdrawalAmount = Math.abs(eventWithdrawal);
-            
-            currentPortfolioValue -= withdrawalAmount; // Reduce portfolio by the withdrawal amount now
-
+            // Bruk porteføljeverdi FØR uttaket til å beregne proporsjoner
+            const preWithdrawalPortfolioValue = currentPortfolioValue;
             const stockShare = (annualStockPercentage / 100);
             const bondShare = 1 - stockShare;
             if (state.investorType === 'Privat') {
@@ -363,7 +393,16 @@ const calculatePrognosis = (state) => {
                 const taxableFromBond = withdrawalAmount * bondShare;
                 if (taxesEnabled) {
                     const stockTax = taxableFromStock * taxRate;
-                    deferredEventTax = stockTax;
+                    let bondTaxNextYear = 0;
+                    if (state.deferredInterestTax === true) {
+                        const bondValueNow = preWithdrawalPortfolioValue * bondShare; // før uttak
+                        const fractionOfBondPortfolio = bondValueNow > 0 ? (taxableFromBond / bondValueNow) : 0;
+                        const realizedUntaxedBondReturn = Math.min(untaxedBondReturnPool, untaxedBondReturnPool * fractionOfBondPortfolio);
+                        untaxedBondReturnPool -= realizedUntaxedBondReturn;
+                        bondTaxNextYear = realizedUntaxedBondReturn * bondTaxRate;
+                    }
+                    deferredEventTax += stockTax;
+                    deferredBondTax += bondTaxNextYear;
                 }
             } else {
                 // AS: invested capital covers the withdrawal first; remainder is taxed as dividend
@@ -371,9 +410,21 @@ const calculatePrognosis = (state) => {
                 taxFreeCapitalRemaining -= fromTaxFree;
                 const taxableWithdrawal = withdrawalAmount - fromTaxFree;
                 if (taxesEnabled && taxableWithdrawal > 0) {
-                    deferredEventTax = taxableWithdrawal * taxRate;
+                    const dividendTax = taxableWithdrawal * taxRate;
+                    let bondTaxNextYear = 0;
+                    if (state.deferredInterestTax === true) {
+                        const bondValueNow = preWithdrawalPortfolioValue * bondShare; // før uttak
+                        const fractionOfBondPortfolio = bondValueNow > 0 ? ((taxableWithdrawal * bondShare) / bondValueNow) : 0;
+                        const realizedUntaxedBondReturn = Math.min(untaxedBondReturnPool, untaxedBondReturnPool * fractionOfBondPortfolio);
+                        untaxedBondReturnPool -= realizedUntaxedBondReturn;
+                        bondTaxNextYear = realizedUntaxedBondReturn * bondTaxRate;
+                    }
+                    deferredEventTax += dividendTax;
+                    deferredBondTax += bondTaxNextYear;
                 }
             }
+            // Til slutt trekkes selve uttaket fra porteføljen
+            currentPortfolioValue = preWithdrawalPortfolioValue - withdrawalAmount;
         }
         
         // --- END OF YEAR ---
@@ -386,7 +437,7 @@ const calculatePrognosis = (state) => {
         data.nettoUtbetaling.push(Math.round(-annualNetWithdrawalAmountForChart));
         data.skatt.push(Math.round(-(taxesEnabled ? annualWithdrawalTaxAmount : 0)));
         data.skatt2.push(Math.round(-(taxesEnabled ? eventTaxToPayThisYear : 0))); // Only event tax paid THIS year
-        const bondTaxPaidThisYear = taxesEnabled ? (bondTaxToPayThisYear + annualBondTaxAmount) : 0; // Deferred from last year + immediate this year
+        const bondTaxPaidThisYear = taxesEnabled ? (bondTaxToPayThisYear + annualBondTaxAmount) : 0; // Deferred fra i fjor + eventuell løpende i år
         data.renteskatt.push(Math.round(-bondTaxPaidThisYear));
         data.annualStockPercentages.push(Math.round(annualStockPercentage));
         data.annualBondPercentages.push(Math.round(annualBondPercentage));
@@ -468,6 +519,30 @@ const TaxCalculationToggle = ({ value, onChange }) => (
         </div>
     </div>
 );
+
+// Koble UI-toggle til app-state: "Utsatt skatt på renter"
+const DeferredInterestTaxToggle = ({ value, onChange }) => {
+    const selected = value ? 'Ja' : 'Nei';
+    return (
+        <div>
+            <label className="typo-label text-[#333333]/80">Utsatt skatt på renter</label>
+            <div className="grid grid-cols-2 gap-2 mt-2">
+                <button
+                    onClick={() => onChange('deferredInterestTax', true)}
+                    className={`p-3 rounded-lg flex items-center justify-center text-center font-medium transition-all transform hover:-translate-y-0.5 ${selected === 'Ja' ? 'bg-[#66CCDD] text-white shadow-lg' : 'bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100'}`}
+                >
+                    <span>Ja</span>
+                </button>
+                <button
+                    onClick={() => onChange('deferredInterestTax', false)}
+                    className={`p-3 rounded-lg flex items-center justify-center text-center font-medium transition-all transform hover:-translate-y-0.5 ${selected === 'Nei' ? 'bg-[#66CCDD] text-white shadow-lg' : 'bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100'}`}
+                >
+                    <span>Nei</span>
+                </button>
+            </div>
+        </div>
+    );
+};
 
 const ResetAllButton = ({ onReset }) => (
     <div>
@@ -1105,6 +1180,7 @@ Alle uttak fra et as vil i modellen ansees som et utbytte. Om det er innskutt ka
 
                         <div className="pt-2 border-t border-[#EEEEEE] space-y-4">
                             <InvestorTypeToggle value={state.investorType} onChange={handleStateChange} />
+                            <DeferredInterestTaxToggle value={state.deferredInterestTax} onChange={handleStateChange} investorType={state.investorType} />
                             <TaxCalculationToggle value={state.taxCalculationEnabled} onChange={handleStateChange} />
                             <ResetAllButton onReset={handleResetAll} />
                             <div>

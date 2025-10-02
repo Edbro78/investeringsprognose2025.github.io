@@ -17,6 +17,12 @@ body, .font-sans { font-family: 'Whitney', -apple-system, BlinkMacSystemFont, 'S
 .typo-h3 { font-family: 'Whitney', sans-serif; font-weight: 700; font-size: clamp(calc(0.875rem * var(--heading-scale)), calc(1.3vw * var(--heading-scale)), calc(1.375rem * var(--heading-scale))); line-height: 1.25; letter-spacing: 0; }
 .typo-h4 { font-family: 'Whitney', sans-serif; font-weight: 700; font-size: calc(1rem * var(--heading-scale)); line-height: 1.35; letter-spacing: 0; }
 
+/* Align headings consistently inside panels */
+.panel h1,
+.panel h2,
+.panel .typo-h1,
+.panel .typo-h2 { margin-top: 0; }
+
 /* Tekstelementer */
 .typo-label { font-family: 'Whitney', sans-serif; font-weight: 500; text-transform: uppercase; letter-spacing: 0.1em; font-size: calc(1rem * var(--label-scale)); }
 .typo-preamble { font-family: 'Whitney', sans-serif; font-weight: 400; font-size: clamp(1rem, 1.5vw, 1.25rem); text-indent: 1.5em; }
@@ -230,4 +236,3 @@ input[type="range"]::-moz-range-thumb {
         height: 250px;
     }
 } 
-

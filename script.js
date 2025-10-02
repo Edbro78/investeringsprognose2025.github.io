@@ -135,6 +135,7 @@ const INITIAL_APP_STATE = {
     desiredAnnualWealthTaxPayout: 200000, // Ny state for ønsket årlig uttak til formuesskatt
     kpiRate: 0.0, // Ny slider for forventet KPI
     deferredInterestTax: false, // Utsatt skatt på renter (kun Privat)
+    advisoryFeeRate: 0.0, // Rådgivningshonorar (prosentpoeng)
 };
 
 const STOCK_ALLOCATION_OPTIONS = [
@@ -691,6 +692,32 @@ const CustomLegend = ({ items }) => (
     </div>
 );
 
+// Eye icon toggle for show/hide panels
+const EyeToggle = ({ visible, onToggle, className, title }) => (
+    <button
+        onClick={onToggle}
+        title={title || (visible ? 'Skjul' : 'Vis')}
+        className={`absolute -top-4 -left-4 bg-white border border-[#DDDDDD] rounded-full p-1.5 shadow hover:bg-gray-50 ${className || ''}`}
+        aria-label={visible ? 'Skjul' : 'Vis'}
+    >
+        {visible ? (
+            // Open eye
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A6D8C" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+        ) : (
+            // Slashed eye
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A6D8C" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a21.8 21.8 0 0 1 5.06-5.94"></path>
+                <path d="M1 1l22 22"></path>
+                <path d="M10.58 10.58a3 3 0 0 0 4.24 4.24"></path>
+                <path d="M9.88 5.09A10.94 10.94 0 0 1 12 5c7 0 11 7 11 7a21.8 21.8 0 0 1-3.06 4.02"></path>
+            </svg>
+        )}
+    </button>
+);
+
 // --- MAIN APP COMPONENT --- //
 function App() {
     const [state, setState] = useState(INITIAL_APP_STATE);
@@ -766,6 +793,51 @@ function App() {
     }, []);
 
     const prognosis = useMemo(() => calculatePrognosis(state), [state]);
+
+    // Målsøk: finn årlig sparing slik at hovedstol ikke er negativ i siste utbetalingsår
+    const goalSeekAnnualSavings = useCallback(() => {
+        // Hvis ingen utbetalingsår, eller allerede OK, gjør ingenting
+        const hasPayoutYears = (state.payoutYears || 0) > 0;
+        if (!hasPayoutYears) return;
+
+        const currentLastPrincipal = prognosis.data.hovedstol[prognosis.data.hovedstol.length - 1];
+        if (currentLastPrincipal >= 0) return;
+
+        const simulateLastPrincipal = (annualSavingsValue) => {
+            const p = calculatePrognosis({ ...state, annualSavings: annualSavingsValue });
+            return p.data.hovedstol[p.data.hovedstol.length - 1];
+        };
+
+        // Finn øvre grense med dobling
+        let low = 0;
+        let high = Math.max(state.annualSavings || 0, 10000);
+        let last = simulateLastPrincipal(high);
+        let attempts = 0;
+        while (last < 0 && high < 100000000 && attempts < 20) { // maks 100MNOK og 20 forsøk
+            high *= 2;
+            last = simulateLastPrincipal(high);
+            attempts++;
+        }
+
+        // Hvis selv enorme verdier ikke holder, avbryt
+        if (last < 0) return;
+
+        // Binærsøk etter minste årlige sparing som gir ikke-negativ hovedstol i siste år
+        for (let i = 0; i < 30; i++) {
+            const mid = (low + high) / 2;
+            const v = simulateLastPrincipal(mid);
+            if (v >= 0) {
+                high = mid;
+            } else {
+                low = mid;
+            }
+        }
+
+        // Rund av til nærmeste slider-steg (10 000)
+        const step = 10000;
+        const rounded = Math.ceil(high / step) * step;
+        setState(s => ({ ...s, annualSavings: rounded }));
+    }, [state, prognosis.data.hovedstol]);
 
     const chartOptions = {
         responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
@@ -966,23 +1038,45 @@ function App() {
                         <Bar options={chartOptions} data={investmentChartData} />
                     </div>
                     <CustomLegend items={state.taxCalculationEnabled ? LEGEND_DATA : LEGEND_DATA.filter(i => !['Skatt på årlige utbetalinger','Skatt på hendelser','Løpende renteskatt'].includes(i.label))} />
-                    <div className="mt-6 border border-[#DDDDDD] rounded-xl p-4">
-                        <h2 className="typo-h2 text-center text-[#4A6D8C] mb-4">Fordeling mellom aksjer og renter</h2>
-                        <div className="flex justify-start -mt-1 mb-1">
-                            <button
-                                onClick={() => setShowDistributionGraphic(v => !v)}
-                                className="text-xs px-2 py-1 rounded-md border border-[#DDDDDD] bg-white text-[#333333] hover:bg-gray-100"
-                                title={showDistributionGraphic ? 'Skjul grafikk' : 'Vis grafikk'}
-                            >
-                                {showDistributionGraphic ? 'Skjul' : 'Vis'}
-                            </button>
-                        </div>
-                        <div className={`relative ${showDistributionGraphic ? 'h-[260px]' : ''}`}>
-                            {showDistributionGraphic && (
-                                <Bar options={stackedAllYearsOptions} data={stackedAllYearsData} />
-                            )}
+                </div>
+
+                {/* Inputfelt for porteføljestørrelse, årlig sparing og aksjeandel */}
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                    <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col gap-6" style={{ minHeight: '250px' }}>
+                        <h2 className="typo-h2 text-[#4A6D8C]">Forutsetninger</h2>
+                        <SliderInput id="initialPortfolioSize" label="Porteføljestørrelse (NOK)" value={state.initialPortfolioSize} min={1000000} max={100000000} step={250000} onChange={handleStateChange} isCurrency />
+                        <SliderInput id="annualSavings" label="Årlig sparing (NOK)" value={state.annualSavings} min={0} max={1200000} step={10000} onChange={handleStateChange} isCurrency />
+                    </div>
+                    <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col gap-6 xl:col-span-2" style={{ minHeight: '250px' }}>
+                        <div>
+                            <h2 className="typo-h2 text-[#4A6D8C]">Aksjeandel første år (%)</h2>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-2 mt-2">
+                                {STOCK_ALLOCATION_OPTIONS.map(opt => (
+                                    <button key={opt.value} onClick={() => handleStateChange('initialStockAllocation', opt.value)} className={`${state.initialStockAllocation === opt.value ? 'bg-[#66CCDD] text-white shadow-lg' : 'bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100'} h-20 rounded-lg flex items-center justify-center text-center p-1 text-sm font-medium transition-all hover:-translate-y-0.5`}>
+                                        {opt.label}
+                                    </button>
+                                ))}
+                                {/* Ny knapp: Målsøk sparing (plassert rett under "100% Renter") */}
+                                <div className="col-start-1 p-1 border rounded-lg bg-[#EAF5FB] border-[#CFE7F5]">
+                                    <button type="button" onClick={goalSeekAnnualSavings} className="w-full bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100 h-20 rounded-lg flex items-center justify-center text-center p-1 text-sm font-medium transition-all hover:-translate-y-0.5">
+                                        Målsøk sparing
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
+                </div>
+
+                <div className="relative">
+                    <EyeToggle visible={showDistributionGraphic} onToggle={() => setShowDistributionGraphic(v => !v)} />
+                    {showDistributionGraphic && (
+                        <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col">
+                            <h2 className="typo-h2 text-center text-[#4A6D8C] mb-4">Fordeling mellom aksjer og renter</h2>
+                            <div className={`relative h-[260px]`}>
+                                <Bar options={stackedAllYearsOptions} data={stackedAllYearsData} />
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {showDisclaimer && (
@@ -1042,35 +1136,26 @@ Alle uttak fra et as vil i modellen ansees som et utbytte. Om det er innskutt ka
                     </div>
                 )}
 
-                <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col">
-                    <h2 className="typo-h2 text-center text-[#4A6D8C] mb-4">Innskutt kapital over tid</h2>
-                    <div className="flex justify-start -mt-1 mb-1">
-                        <button
-                            onClick={() => setShowInvestedCapitalGraphic(v => !v)}
-                            className="text-xs px-2 py-1 rounded-md border border-[#DDDDDD] bg-white text-[#333333] hover:bg-gray-100"
-                            title={showInvestedCapitalGraphic ? 'Skjul grafikk' : 'Vis grafikk'}
-                        >
-                            {showInvestedCapitalGraphic ? 'Skjul' : 'Vis'}
-                        </button>
-                    </div>
-                    <div className={`relative ${showInvestedCapitalGraphic ? 'h-[300px]' : ''}`}>
-                        {showInvestedCapitalGraphic && (
-                            <Bar options={capitalChartOptions} data={investedCapitalChartData} />
-                        )}
-                    </div>
+                <div className="relative">
+                    <EyeToggle visible={showInvestedCapitalGraphic} onToggle={() => setShowInvestedCapitalGraphic(v => !v)} />
+                    {showInvestedCapitalGraphic && (
+                        <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col">
+                            <h2 className="typo-h2 text-center text-[#4A6D8C] mb-4">Innskutt kapital over tid</h2>
+                            <div className="relative h-[300px]">
+                                <Bar options={capitalChartOptions} data={investedCapitalChartData} />
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
                     {/* Assumptions Panel */}
                     <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col gap-6">
                         <h2 className="typo-h2 text-[#4A6D8C]">Forutsetninger</h2>
-                        <SliderInput id="initialPortfolioSize" label="Porteføljestørrelse (NOK)" value={state.initialPortfolioSize} min={1000000} max={100000000} step={250000} onChange={handleStateChange} isCurrency />
                         <SliderInput id="investedCapital" label="Innskutt kapital (skattefri) (NOK)" value={state.investedCapital} min={0} max={state.initialPortfolioSize + state.pensionPortfolioSize} step={100000} onChange={handleStateChange} isCurrency />
                         <SliderInput id="pensionPortfolioSize" label="Pensjonsportefølje (NOK)" value={state.pensionPortfolioSize} min={0} max={10000000} step={250000} onChange={handleStateChange} isCurrency />
                         <SliderInput id="investmentYears" label="Antall år investeringsperiode" value={state.investmentYears} min={1} max={30} step={1} onChange={handleStateChange} unit="år" />
                         <SliderInput id="payoutYears" label="Antall år med utbetaling" value={state.payoutYears} min={0} max={30} step={1} onChange={handleStateChange} unit="år" />
-                       
-                         <SliderInput id="annualSavings" label="Årlig sparing (NOK)" value={state.annualSavings} min={0} max={1200000} step={10000} onChange={handleStateChange} isCurrency />
                          
                          {/* Ønsket årlig utbetaling */}
                          <div>
@@ -1108,35 +1193,48 @@ Alle uttak fra et as vil i modellen ansees som et utbytte. Om det er innskutt ka
 
                     {/* Parameters Panel */}
                     <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col gap-6">
-                        <h2 className="typo-h2 text-[#4A6D8C]">Parametere</h2>
                         
+                        
+
+                        
+
                         <div>
-                            <label className="typo-label text-[#333333]/80">Aksjeandel første år (%)</label>
-                            <div className="grid grid-cols-4 gap-2 mt-2">
-                                {STOCK_ALLOCATION_OPTIONS.map(opt => (
-                                    <button key={opt.value} onClick={() => handleStateChange('initialStockAllocation', opt.value)} className={`aspect-square rounded-lg flex items-center justify-center text-center p-1 font-medium transition-all transform hover:-translate-y-0.5 ${state.initialStockAllocation === opt.value ? 'bg-[#66CCDD] text-white shadow-lg' : 'bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100'}`}>
-                                        {opt.label}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                        
-
-                        <div className="mt-4">
                             <h3 className="typo-h2 text-[#4A6D8C] mb-4">Forventet avkastning</h3>
                             <SliderInput id="stockReturnRate" label="Forventet avkastning aksjer" value={state.stockReturnRate} min={5} max={10} step={0.1} onChange={handleStateChange} displayValue={`${state.stockReturnRate.toFixed(1)}%`} />
                             <SliderInput id="bondReturnRate" label="Forventet avkastning renter" value={state.bondReturnRate} min={3} max={9} step={0.1} onChange={handleStateChange} displayValue={`${state.bondReturnRate.toFixed(1)}%`} />
                             <SliderInput id="kpiRate" label="Forventet KPI" value={state.kpiRate} min={0} max={5} step={0.1} onChange={handleStateChange} displayValue={`${state.kpiRate.toFixed(1)}%`} />
 
+                            {/* Rådgivningshonorar knapper */}
+                            <div className="mt-4">
+                                <div className="typo-label text-[#333333]/80 mb-2">Rådgivningshonorar</div>
+                                <div className="grid grid-cols-6 gap-2">
+                                    {[
+                                        { label: '0%', value: 0.0 },
+                                        { label: '1,37%', value: 1.37 },
+                                        { label: '0,93%', value: 0.93 },
+                                        { label: '0,81%', value: 0.81 },
+                                        { label: '0,69%', value: 0.69 },
+                                        { label: '0,57%', value: 0.57 },
+                                    ].map(opt => (
+                                        <button
+                                            key={opt.label}
+                                            onClick={() => handleStateChange('advisoryFeeRate', opt.value)}
+                                            className={`${state.advisoryFeeRate === opt.value ? 'bg-[#66CCDD] text-white shadow-lg' : 'bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100'} h-12 rounded-lg flex items-center justify-center text-center p-1 text-sm font-medium transition-all hover:-translate-y-0.5`}
+                                        >
+                                            {opt.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
                             {/* Forventet avkastning felt */}
-                            <div className="bg-gray-50 border border-[#DDDDDD] rounded-lg p-3 mt-1">
+                            <div className="bg-gray-50 border border-[#DDDDDD] rounded-lg p-3 mt-4">
                                 <div className="typo-label text-[#333333]/70 mb-1">Forventet avkastning:</div>
                                 <div className="text-lg font-semibold text-[#4A6D8C]">
                                     {(() => {
                                         const stockAllocation = state.initialStockAllocation / 100;
                                         const bondAllocation = (100 - state.initialStockAllocation) / 100;
-                                        const weightedReturn = (stockAllocation * state.stockReturnRate) + (bondAllocation * state.bondReturnRate) - state.kpiRate;
+                                        const weightedReturn = (stockAllocation * state.stockReturnRate) + (bondAllocation * state.bondReturnRate) - state.kpiRate - state.advisoryFeeRate;
                                         return `${weightedReturn.toFixed(1)}%`;
                                     })()}
                                 </div>
@@ -1156,7 +1254,7 @@ Alle uttak fra et as vil i modellen ansees som et utbytte. Om det er innskutt ka
 
                     {/* Events Panel - fixed 4-slot area with controls below */}
                     <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col gap-6">
-                        <div className="flex justify-between items-center">
+                        <div className="flex justify-between items-start">
                             <h2 className="typo-h2 text-[#4A6D8C]">Hendelser</h2>
                             <button onClick={handleAddEvent} disabled={(state.events?.length || 0) >= MAX_EVENTS} className={`flex items-center gap-2 font-medium py-2 px-4 rounded-lg transition-all transform hover:-translate-y-0.5 shadow-md ${((state.events?.length || 0) >= MAX_EVENTS) ? 'bg-gray-300 text-white cursor-not-allowed' : 'bg-[#3388CC] hover:bg-[#005599] text-white'}`}>
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>

@@ -204,6 +204,8 @@ const calculatePrognosis = (state) => {
     const shieldingRate = state.shieldingRate / 100;
     const taxRate = state.manualStockTaxRate / 100; // Bruker manuell aksjebeskatning
     const bondTaxRate = state.manualBondTaxRate / 100; // Bruker manuell kapitalskatt
+    const kpiRate = state.kpiRate / 100; // KPI som skal fordeles proporsjonalt
+    const advisoryFeeRate = state.advisoryFeeRate / 100; // Rådgivningshonorar som skal fordeles proporsjonalt
 
     const annualStockPercentages = populateAnnualStockPercentages(state);
     const totalSimulatedYears = state.investmentYears + state.payoutYears;
@@ -279,6 +281,7 @@ const calculatePrognosis = (state) => {
         const annualStockPercentage = annualStockPercentages[i];
         const annualBondPercentage = 100 - annualStockPercentage;
         let totalGrossReturn = 0;
+        let totalNetReturnBeforeTax = 0; // Brutto avkastning minus KPI og honorar (før skatt)
         let annualBondTaxAmount = 0; // Bond tax paid for the CURRENT year (ikke utsatt)
 
         if (currentPortfolioValue > 0) {
@@ -287,17 +290,27 @@ const calculatePrognosis = (state) => {
             const grossStockReturn = stockValue * stockReturnRate;
             const grossBondReturn = bondValue * bondReturnRate;
             totalGrossReturn = grossStockReturn + grossBondReturn;
-            
-            // Utsatt rente-skatt: Ikke betal løpende renteskatt; legg i pool og skatt neste år ved uttak (gjelder både Privat og AS når aktivert)
+
+            // Fordel KPI og rådgivningshonorar proporsjonalt mellom aksjer og renter
+            const stockKpiReduction = stockValue * kpiRate;
+            const bondKpiReduction = bondValue * kpiRate;
+            const stockFeeReduction = stockValue * advisoryFeeRate;
+            const bondFeeReduction = bondValue * advisoryFeeRate;
+            const netStockReturn = grossStockReturn - stockKpiReduction - stockFeeReduction;
+            const netBondReturnBeforeTax = grossBondReturn - bondKpiReduction - bondFeeReduction;
+            totalNetReturnBeforeTax = netStockReturn + netBondReturnBeforeTax;
+
+            // Utsatt rente-skatt: Ikke betal løpende renteskatt; legg i pool og skatt neste år ved uttak
             const useDeferredBondTax = taxesEnabled && state.deferredInterestTax === true;
             if (useDeferredBondTax) {
                 untaxedBondReturnPool += grossBondReturn;
                 annualBondTaxAmount = 0; // ingen direkte skatt i år
-                currentPortfolioValue += totalGrossReturn; // ingen skatt trekkes nå
+                // Legg til bruttoavkastning fratrukket KPI og honorar
+                currentPortfolioValue += netStockReturn + netBondReturnBeforeTax;
             } else {
-                // Standard: betal løpende renteskatt samme år
+                // Standard: betal løpende renteskatt samme år (på nominell renteavkastning)
                 annualBondTaxAmount = taxesEnabled ? (grossBondReturn * bondTaxRate) : 0;
-                currentPortfolioValue += totalGrossReturn - annualBondTaxAmount;
+                currentPortfolioValue += netStockReturn + (netBondReturnBeforeTax - annualBondTaxAmount);
             }
         }
 
@@ -432,7 +445,8 @@ const calculatePrognosis = (state) => {
 
         // 6. Push data to arrays for charting
         data.hovedstol.push(Math.round(startOfYearPortfolioValue));
-        data.avkastning.push(Math.round(totalGrossReturn));
+        // Vis avkastning NETTO for KPI og honorar i "Mål og behov"-grafen
+        data.avkastning.push(Math.round(totalNetReturnBeforeTax));
         data.sparing.push(Math.round(isInvestmentYear ? state.annualSavings : 0));
         data.event_total.push(Math.round(netEventAmountForChart));
         data.nettoUtbetaling.push(Math.round(-annualNetWithdrawalAmountForChart));
@@ -930,8 +944,10 @@ function App() {
         }
 
         // Årlig bruttoavkastning pr aktivaklasse (samme metode som øvrig grafikk)
-        const aksjeAvkastningAnnual = startOfYearStockValues.map((v, i) => i === 0 ? 0 : Math.round(v * (state.stockReturnRate / 100)));
-        const renteAvkastningAnnual = startOfYearBondValues.map((v, i) => i === 0 ? 0 : Math.round(v * (state.bondReturnRate / 100)));
+        const kpi = state.kpiRate / 100;
+        const fee = state.advisoryFeeRate / 100;
+        const aksjeAvkastningAnnual = startOfYearStockValues.map((v, i) => i === 0 ? 0 : Math.round(v * ((state.stockReturnRate / 100) - kpi - fee)));
+        const renteAvkastningAnnual = startOfYearBondValues.map((v, i) => i === 0 ? 0 : Math.round(v * ((state.bondReturnRate / 100) - kpi - fee)));
 
         // Tilstand over tid
         const stockPrincipal = new Array(len).fill(0);
@@ -1234,7 +1250,9 @@ Alle uttak fra et as vil i modellen ansees som et utbytte. Om det er innskutt ka
                                     {(() => {
                                         const stockAllocation = state.initialStockAllocation / 100;
                                         const bondAllocation = (100 - state.initialStockAllocation) / 100;
-                                        const weightedReturn = (stockAllocation * state.stockReturnRate) + (bondAllocation * state.bondReturnRate) - state.kpiRate - state.advisoryFeeRate;
+                                        const netStock = (state.stockReturnRate - state.kpiRate - state.advisoryFeeRate) * stockAllocation;
+                                        const netBond = (state.bondReturnRate - state.kpiRate - state.advisoryFeeRate) * bondAllocation;
+                                        const weightedReturn = netStock + netBond;
                                         return `${weightedReturn.toFixed(1)}%`;
                                     })()}
                                 </div>

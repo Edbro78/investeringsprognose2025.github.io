@@ -113,13 +113,13 @@ const LEGEND_DATA = [
 ];
 
 const INITIAL_APP_STATE = {
-    initialPortfolioSize: 5000000,
+    initialPortfolioSize: 10000000,
     pensionPortfolioSize: 0,
-    investedCapital: 2500000,
+    investedCapital: 0,
     investmentYears: 10,
-    payoutYears: 10,
-    desiredAnnualPayoutAfterTax: 1000000,
-    initialStockAllocation: 65,
+    payoutYears: 0,
+    desiredAnnualPayoutAfterTax: 0,
+    initialStockAllocation: 0,
     stockReturnRate: 8.0,
     bondReturnRate: 5.0,
     shieldingRate: 3.9,
@@ -131,8 +131,8 @@ const INITIAL_APP_STATE = {
     taxCalculationEnabled: true, // Skatteberegning på/av
     manualBondTaxRate: 22.0, // Ny state for manuell kapitalskatt
     manualStockTaxRate: 37.8, // Ny state for manuell aksjebeskatning
-    desiredAnnualConsumptionPayout: 800000, // Ny state for ønsket årlig uttak til forbruk
-    desiredAnnualWealthTaxPayout: 200000, // Ny state for ønsket årlig uttak til formuesskatt
+    desiredAnnualConsumptionPayout: 0, // Ny state for ønsket årlig uttak til forbruk
+    desiredAnnualWealthTaxPayout: 0, // Ny state for ønsket årlig uttak til formuesskatt
     kpiRate: 0.0, // Ny slider for forventet KPI
     deferredInterestTax: false, // Utsatt skatt på renter (kun Privat)
     advisoryFeeRate: 0.0, // Rådgivningshonorar (prosentpoeng)
@@ -471,27 +471,59 @@ const formatCurrency = (value) => new Intl.NumberFormat('nb-NO', { style: 'curre
 const formatNumberRaw = (value) => new Intl.NumberFormat('nb-NO', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value);
 
 // --- HELPER & CHILD COMPONENTS --- //
-const SliderInput = ({ id, label, value, min, max, step, onChange, unit, isCurrency, displayValue }) => (
-    <div>
-        <label htmlFor={id} className="typo-label text-[#333333]/80">{label}</label>
-        <div className="flex items-center gap-4 mt-1">
-            <input
-                type="range"
-                id={id}
-                name={id}
-                min={min}
-                max={max}
-                step={step}
-                value={value}
-                onChange={(e) => onChange(id, parseFloat(e.target.value))}
-                className="w-full h-2 bg-[#DDDDDD] rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-[#66CCDD] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white"
-            />
-            <span className="typo-paragraph text-[#333333] w-32 text-right">
-                {displayValue ?? (isCurrency ? formatCurrency(value) : `${formatNumberRaw(value)} ${unit}`)}
-            </span>
-        </div>
-    </div>
-);
+const SliderInput = ({ id, label, value, min, max, step, onChange, unit, isCurrency, displayValue, allowDirectInput }) => {
+	const [textValue, setTextValue] = React.useState(() => (isCurrency ? formatCurrency(value) : `${formatNumberRaw(value)}${unit ? ` ${unit}` : ''}`));
+
+	React.useEffect(() => {
+		setTextValue(isCurrency ? formatCurrency(value) : `${formatNumberRaw(value)}${unit ? ` ${unit}` : ''}`);
+	}, [value, isCurrency, unit]);
+
+	const parseCurrencyInput = (raw) => {
+		const digitsOnly = String(raw).replace(/[^0-9]/g, '');
+		const num = parseInt(digitsOnly, 10);
+		return isNaN(num) ? 0 : num;
+	};
+
+	const handleBlur = () => {
+		if (!allowDirectInput) return;
+		const parsed = isCurrency ? parseCurrencyInput(textValue) : parseFloat(String(textValue).replace(/[^0-9.\-]/g, '')) || 0;
+		onChange(id, parsed);
+		setTextValue(isCurrency ? formatCurrency(parsed) : `${formatNumberRaw(parsed)}${unit ? ` ${unit}` : ''}`);
+	};
+
+	return (
+		<div>
+			<label htmlFor={id} className="typo-label text-[#333333]/80">{label}</label>
+			<div className="flex items-center gap-4 mt-1">
+				<input
+					type="range"
+					id={id}
+					name={id}
+					min={min}
+					max={max}
+					step={step}
+					value={value}
+					onChange={(e) => onChange(id, parseFloat(e.target.value))}
+					className="w-full h-2 bg-[#DDDDDD] rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-[#66CCDD] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white"
+				/>
+				{allowDirectInput ? (
+					<input
+						type="text"
+						value={textValue}
+						onChange={(e) => setTextValue(e.target.value)}
+						onBlur={handleBlur}
+						onFocus={(e) => e.target.select()}
+						className="bg-white border border-[#DDDDDD] rounded-md px-3 py-1.5 text-[#333333] text-right w-32"
+					/>
+				) : (
+					<span className="typo-paragraph text-[#333333] w-32 text-right">
+						{displayValue ?? (isCurrency ? formatCurrency(value) : `${formatNumberRaw(value)} ${unit}`)}
+					</span>
+				)}
+			</div>
+		</div>
+	);
+};
 
 // Fjernet UI for 'Utsatt skatt på renter'
 
@@ -739,6 +771,9 @@ function App() {
     const [showDistributionGraphic, setShowDistributionGraphic] = useState(true);
     const [showInvestedCapitalGraphic, setShowInvestedCapitalGraphic] = useState(true);
     const [showDisclaimer, setShowDisclaimer] = useState(false);
+	const [showOutputModal, setShowOutputModal] = useState(false);
+	const [outputText, setOutputText] = useState('');
+	const [copied, setCopied] = useState(false);
 
     const handleStateChange = useCallback((id, value) => {
         setState(prevState => {
@@ -807,6 +842,123 @@ function App() {
     }, []);
 
     const prognosis = useMemo(() => calculatePrognosis(state), [state]);
+
+	// --- Output generation & clipboard helpers --- //
+	const generateOutputText = useCallback(() => {
+		const lines = [];
+		const totalYears = (state.investmentYears || 0) + (state.payoutYears || 0);
+		const lastIndex = Math.max(0, (prognosis.labels?.length || 1) - 1);
+		const lastYearLabel = prognosis.labels?.[lastIndex] || '';
+		const lastPrincipal = prognosis.data?.hovedstol?.[prognosis.data.hovedstol.length - 1] ?? 0;
+		const sum = (arr) => (arr || []).reduce((a, b) => a + (Number(b) || 0), 0);
+		const totalSavings = sum(prognosis.data?.sparing);
+		const totalEventsNetto = sum(prognosis.data?.event_total);
+		const totalNetPayout = sum(prognosis.data?.nettoUtbetaling);
+		const totalSkattHendelser = sum(prognosis.data?.skatt2);
+		const totalRenteskatt = sum(prognosis.data?.renteskatt);
+		const startStockPct = prognosis.data?.annualStockPercentages?.[0] ?? state.initialStockAllocation;
+		const endStockPct = prognosis.data?.annualStockPercentages?.[prognosis.data.annualStockPercentages.length - 1] ?? startStockPct;
+		const lastInvestedCapital = prognosis.data?.investedCapitalHistory?.[prognosis.data.investedCapitalHistory.length - 1] ?? state.investedCapital;
+
+		lines.push('Output');
+		lines.push('');
+		lines.push('— Inputverdier —');
+		lines.push(`Porteføljestørrelse: ${formatCurrency(state.initialPortfolioSize)}`);
+		lines.push(`Pensjonsportefølje: ${formatCurrency(state.pensionPortfolioSize)}`);
+		lines.push(`Innskutt kapital (skattefri): ${formatCurrency(state.investedCapital)}`);
+		lines.push(`Årlig sparing: ${formatCurrency(state.annualSavings)}`);
+		lines.push(`Investeringsperiode: ${formatNumberRaw(state.investmentYears)} år`);
+		lines.push(`Utbetalingsperiode: ${formatNumberRaw(state.payoutYears)} år`);
+		lines.push(`Aksjeandel første år: ${formatNumberRaw(state.initialStockAllocation)}%`);
+		lines.push(`Forventet avkastning aksjer: ${state.stockReturnRate.toFixed(1)}%`);
+		lines.push(`Forventet avkastning renter: ${state.bondReturnRate.toFixed(1)}%`);
+		lines.push(`Skjermingsrente: ${state.shieldingRate.toFixed(1)}%`);
+		lines.push(`Utbytteskatt / skatt aksjer: ${state.manualStockTaxRate.toFixed(1)}%`);
+		lines.push(`Kapitalskatt: ${state.manualBondTaxRate.toFixed(1)}%`);
+		lines.push(`Forventet KPI: ${state.kpiRate.toFixed(1)}%`);
+		lines.push(`Rådgivningshonorar: ${state.advisoryFeeRate.toFixed(2)}%`);
+		lines.push(`Ønsket årlig uttak til forbruk: ${formatCurrency(state.desiredAnnualConsumptionPayout)}`);
+		lines.push(`Ønsket årlig uttak til formuesskatt: ${formatCurrency(state.desiredAnnualWealthTaxPayout)}`);
+		lines.push(`Investor type: ${state.investorType}`);
+		lines.push(`Skatteberegning: ${state.taxCalculationEnabled ? 'På' : 'Av'}`);
+		lines.push(`Utsatt skatt på renter: ${state.deferredInterestTax ? 'Ja' : 'Nei'}`);
+		lines.push(`Aksjeandel nedtrapping: ${state.taperingOption}`);
+		lines.push('');
+		lines.push('Hendelser:');
+		if ((state.events || []).length === 0) {
+			lines.push('  (Ingen)');
+		} else {
+			(state.events || []).forEach((e, idx) => {
+				const affects = (e.addToInvestedCapital !== false) ? 'Ja' : 'Nei';
+				lines.push(`  ${idx + 1}. ${e.type || 'Hendelse'} | Beløp: ${formatCurrency(e.belop || 0)} | Fra: ${e.startAar} Til: ${e.sluttAar} | Påvirker innskutt kapital: ${affects}`);
+			});
+		}
+		lines.push('');
+		lines.push('— Resultater —');
+		lines.push(`Startår: ${START_YEAR} | Antall år: ${formatNumberRaw(totalYears)} | Siste år: ${lastYearLabel}`);
+		lines.push(`Hovedstol siste år: ${formatCurrency(lastPrincipal)}`);
+		lines.push(`Sum årlig sparing: ${formatCurrency(totalSavings)}`);
+		lines.push(`Sum hendelser (netto): ${formatCurrency(totalEventsNetto)}`);
+		lines.push(`Sum netto utbetaling: ${formatCurrency(totalNetPayout)}`);
+		lines.push(`Sum skatt på hendelser (betalt): ${formatCurrency(totalSkattHendelser)}`);
+		lines.push(`Sum løpende renteskatt (betalt): ${formatCurrency(totalRenteskatt)}`);
+		lines.push(`Aksjeandel ved start/slutt: ${formatNumberRaw(startStockPct)}% → ${formatNumberRaw(endStockPct)}%`);
+		lines.push(`Innskutt kapital ved slutt: ${formatCurrency(lastInvestedCapital)}`);
+		lines.push('');
+		lines.push('Sanntidsdata genereres ved hvert trykk på «Output».');
+		return lines.join('\n');
+	}, [state, prognosis]);
+
+	const copyTextToClipboard = useCallback(async (text) => {
+		try {
+			if (navigator?.clipboard?.writeText) {
+				await navigator.clipboard.writeText(text);
+				return true;
+			}
+			throw new Error('Navigator clipboard not available');
+		} catch (_) {
+			try {
+				const textarea = document.createElement('textarea');
+				textarea.value = text;
+				textarea.setAttribute('readonly', '');
+				textarea.style.position = 'fixed';
+				textarea.style.opacity = '0';
+				document.body.appendChild(textarea);
+				textarea.focus();
+				textarea.select();
+				const successful = document.execCommand('copy');
+				document.body.removeChild(textarea);
+				return successful;
+			} catch (err) {
+				console.error('Kopiering feilet:', err);
+				return false;
+			}
+		}
+	}, []);
+
+	const handleOpenOutput = useCallback(() => {
+		setOutputText(generateOutputText());
+		setShowOutputModal(true);
+	}, [generateOutputText]);
+
+	const handleCopyOutput = useCallback(async () => {
+		const ok = await copyTextToClipboard(outputText);
+		if (ok) {
+			setCopied(true);
+			setTimeout(() => setCopied(false), 2000);
+		} else {
+			alert('Kunne ikke kopiere teksten til utklippstavlen.');
+		}
+	}, [copyTextToClipboard, outputText]);
+
+	useEffect(() => {
+		if (!showOutputModal) return;
+		const onKey = (e) => {
+			if (e.key === 'Escape') setShowOutputModal(false);
+		};
+		document.addEventListener('keydown', onKey);
+		return () => document.removeEventListener('keydown', onKey);
+	}, [showOutputModal]);
 
     // Målsøk: finn årlig sparing slik at hovedstol ikke er negativ i siste utbetalingsår
     const goalSeekAnnualSavings = useCallback(() => {
@@ -1058,9 +1210,9 @@ function App() {
 
                 {/* Inputfelt for porteføljestørrelse, årlig sparing og aksjeandel */}
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                    <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col gap-6" style={{ minHeight: '250px' }}>
+						<div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col gap-6" style={{ minHeight: '250px' }}>
                         <h2 className="typo-h2 text-[#4A6D8C]">Forutsetninger</h2>
-                        <SliderInput id="initialPortfolioSize" label="Porteføljestørrelse (NOK)" value={state.initialPortfolioSize} min={1000000} max={100000000} step={250000} onChange={handleStateChange} isCurrency />
+							<SliderInput id="initialPortfolioSize" label="Porteføljestørrelse (NOK)" value={state.initialPortfolioSize} min={1000000} max={100000000} step={250000} onChange={handleStateChange} isCurrency allowDirectInput />
                         <SliderInput id="annualSavings" label="Årlig sparing (NOK)" value={state.annualSavings} min={0} max={1200000} step={10000} onChange={handleStateChange} isCurrency />
                     </div>
                     <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col gap-6 xl:col-span-2" style={{ minHeight: '250px' }}>
@@ -1314,6 +1466,63 @@ Alle uttak fra et as vil i modellen ansees som et utbytte. Om det er innskutt ka
                     </div>
                 </div>
             </div>
+
+			{/* Fixed Output button */}
+			<button
+				onClick={handleOpenOutput}
+				className="fixed bottom-4 right-4 z-50 px-3 py-1.5 text-xs font-medium rounded-full bg-slate-700/70 hover:bg-slate-700 text-slate-200 border border-slate-600/70 shadow-sm transition-colors"
+				aria-label="Output"
+			>
+				Output
+			</button>
+
+			{/* Output Modal */}
+			{showOutputModal && (
+				<div
+					className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
+					onClick={() => setShowOutputModal(false)}
+				>
+					<div
+						className="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-6 relative max-h-[80vh] overflow-auto"
+						onClick={(e) => e.stopPropagation()}
+					>
+						<button
+							aria-label="Lukk"
+							onClick={() => setShowOutputModal(false)}
+							className="absolute top-3 right-3 text-[#333333]/70 hover:text-[#333333]"
+						>
+							✕
+						</button>
+						<h3 className="typo-h3 text-[#4A6D8C] mb-4">Output</h3>
+						<div className="relative">
+							<textarea
+								readOnly
+								value={outputText}
+								className="output-textarea w-full h-64 bg-white border border-[#DDDDDD] rounded-md p-3 text-[#333333] whitespace-pre-wrap break-words focus:outline-none focus:ring-2 focus:ring-[#66CCDD] focus:border-transparent pr-24"
+							/>
+							<button
+								onClick={handleCopyOutput}
+								type="button"
+								className={`copy-btn absolute bottom-3 right-3 inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-full border shadow-sm transition-all ${copied ? 'bg-green-600 hover:bg-green-700 text-white border-green-500/80' : 'bg-blue-600 hover:bg-blue-700 text-white border-blue-500/80'}`}
+							>
+								{copied ? (
+									<>
+										{/* Check icon */}
+										<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+										<span>Kopiert!</span>
+									</>
+								) : (
+									<>
+										{/* Copy icon */}
+										<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+										<span>Kopier</span>
+									</>
+								)}
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
         </div>
     );
 }

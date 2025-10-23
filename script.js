@@ -77,6 +77,25 @@ const Line = ({ data, options }) => {
     return React.createElement('canvas', { ref: canvasRef });
 };
 
+// Simple Doughnut/Pie using Chart.js directly
+const Doughnut = ({ data, options, type = 'pie' }) => {
+    const canvasRef = React.useRef(null);
+    const chartRef = React.useRef(null);
+
+    React.useEffect(() => {
+        if (canvasRef.current && typeof Chart !== 'undefined') {
+            if (chartRef.current) {
+                chartRef.current.destroy();
+            }
+            const ctx = canvasRef.current.getContext('2d');
+            chartRef.current = new Chart(ctx, { type, data, options });
+        }
+        return () => { if (chartRef.current) chartRef.current.destroy(); };
+    }, [data, options, type]);
+
+    return React.createElement('canvas', { ref: canvasRef });
+};
+
 // --- From constants.ts ---
 const START_YEAR = new Date().getFullYear();
 
@@ -115,6 +134,7 @@ const LEGEND_DATA = [
 const INITIAL_APP_STATE = {
     initialPortfolioSize: 10000000,
     pensionPortfolioSize: 0,
+    additionalPensionAmount: 0,
     investedCapital: 0,
     investmentYears: 10,
     payoutYears: 0,
@@ -471,7 +491,7 @@ const formatCurrency = (value) => new Intl.NumberFormat('nb-NO', { style: 'curre
 const formatNumberRaw = (value) => new Intl.NumberFormat('nb-NO', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value);
 
 // --- HELPER & CHILD COMPONENTS --- //
-const SliderInput = ({ id, label, value, min, max, step, onChange, unit, isCurrency, displayValue, allowDirectInput }) => {
+const SliderInput = ({ id, label, value, min, max, step, onChange, unit, isCurrency, displayValue, allowDirectInput, inline }) => {
 	const [textValue, setTextValue] = React.useState(() => (isCurrency ? formatCurrency(value) : `${formatNumberRaw(value)}${unit ? ` ${unit}` : ''}`));
 
 	React.useEffect(() => {
@@ -491,38 +511,71 @@ const SliderInput = ({ id, label, value, min, max, step, onChange, unit, isCurre
 		setTextValue(isCurrency ? formatCurrency(parsed) : `${formatNumberRaw(parsed)}${unit ? ` ${unit}` : ''}`);
 	};
 
-	return (
-		<div>
-			<label htmlFor={id} className="typo-label text-[#333333]/80">{label}</label>
-			<div className="flex items-center gap-4 mt-1">
-				<input
-					type="range"
-					id={id}
-					name={id}
-					min={min}
-					max={max}
-					step={step}
-					value={value}
-					onChange={(e) => onChange(id, parseFloat(e.target.value))}
-					className="w-full h-2 bg-[#DDDDDD] rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-[#66CCDD] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white"
-				/>
-				{allowDirectInput ? (
-					<input
-						type="text"
-						value={textValue}
-						onChange={(e) => setTextValue(e.target.value)}
-						onBlur={handleBlur}
-						onFocus={(e) => e.target.select()}
-						className="bg-white border border-[#DDDDDD] rounded-md px-3 py-1.5 text-[#333333] text-right w-32"
-					/>
-				) : (
-					<span className="typo-paragraph text-[#333333] w-32 text-right">
-						{displayValue ?? (isCurrency ? formatCurrency(value) : `${formatNumberRaw(value)} ${unit}`)}
-					</span>
-				)}
-			</div>
-		</div>
-	);
+    return (
+        <div>
+            {inline ? (
+                <div className="relative flex items-center gap-4 mt-1 pr-40">
+                    <label htmlFor={id} className="typo-label text-[#333333]/80 whitespace-nowrap normal-case min-w-[90px]">{label}</label>
+                    <input
+                        type="range"
+                        id={id}
+                        name={id}
+                        min={min}
+                        max={max}
+                        step={step}
+                        value={value}
+                        onChange={(e) => onChange(id, parseFloat(e.target.value))}
+                        className="w-full h-2 bg-[#DDDDDD] rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-[#66CCDD] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white"
+                    />
+                    {allowDirectInput ? (
+                    <input
+                            type="text"
+                            value={textValue}
+                            onChange={(e) => setTextValue(e.target.value)}
+                            onBlur={handleBlur}
+                            onFocus={(e) => e.target.select()}
+                        className="bg-white border border-[#DDDDDD] rounded-md pl-3 pr-0 py-1.5 text-[#333333] text-right w-32 absolute right-4"
+                        />
+                    ) : (
+                    <span className="typo-paragraph text-[#333333] w-32 text-right pr-1 absolute right-4">
+                            {displayValue ?? (isCurrency ? formatCurrency(value) : `${formatNumberRaw(value)} ${unit}`)}
+                        </span>
+                    )}
+                </div>
+            ) : (
+                <>
+                    <label htmlFor={id} className="typo-label text-[#333333]/80">{label}</label>
+                    <div className="flex items-center gap-4 mt-1">
+                        <input
+                            type="range"
+                            id={id}
+                            name={id}
+                            min={min}
+                            max={max}
+                            step={step}
+                            value={value}
+                            onChange={(e) => onChange(id, parseFloat(e.target.value))}
+                            className="w-full h-2 bg-[#DDDDDD] rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-[#66CCDD] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white"
+                        />
+                        {allowDirectInput ? (
+                            <input
+                                type="text"
+                                value={textValue}
+                                onChange={(e) => setTextValue(e.target.value)}
+                                onBlur={handleBlur}
+                                onFocus={(e) => e.target.select()}
+                                className="bg-white border border-[#DDDDDD] rounded-md px-3 py-1.5 text-[#333333] text-right w-32"
+                            />
+                        ) : (
+                        <span className="typo-paragraph text-[#333333] w-32 text-right pr-1">
+                                {displayValue ?? (isCurrency ? formatCurrency(value) : `${formatNumberRaw(value)} ${unit}`)}
+                            </span>
+                        )}
+                    </div>
+                </>
+            )}
+        </div>
+    );
 };
 
 // Fjernet UI for 'Utsatt skatt på renter'
@@ -774,6 +827,8 @@ function App() {
 	const [showOutputModal, setShowOutputModal] = useState(false);
 	const [outputText, setOutputText] = useState('');
 	const [copied, setCopied] = useState(false);
+    const [showAssumptionsGraphic, setShowAssumptionsGraphic] = useState(false);
+    const [advisoryInputValue, setAdvisoryInputValue] = useState(INITIAL_APP_STATE.advisoryFeeRate);
 
     const handleStateChange = useCallback((id, value) => {
         setState(prevState => {
@@ -1189,6 +1244,46 @@ function App() {
     const totalYears = state.investmentYears + state.payoutYears;
     const maxEventYear = START_YEAR + totalYears - 1;
 
+    // --- Pie chart for portfolio split ---
+    const pieData = React.useMemo(() => {
+        const values = [
+            Math.max(0, state.initialPortfolioSize || 0),
+            Math.max(0, state.pensionPortfolioSize || 0),
+            Math.max(0, state.additionalPensionAmount || 0),
+        ];
+        const total = values.reduce((a, b) => a + b, 0) || 1;
+        return {
+            labels: ['Portefølje I', 'Portefølje II', 'Likviditetsfond'],
+            datasets: [{
+                data: values,
+                backgroundColor: [CHART_COLORS.hovedstol, CHART_COLORS.sparing, CHART_COLORS.avkastning],
+                borderColor: [CHART_COLORS.hovedstol, CHART_COLORS.sparing, CHART_COLORS.avkastning],
+                borderWidth: 2,
+                hoverOffset: 10,
+                offset: (ctx) => [12, 8, 6][ctx.dataIndex] || 6,
+            }],
+            _meta: { total }
+        };
+    }, [state.initialPortfolioSize, state.pensionPortfolioSize, state.additionalPensionAmount]);
+
+    const pieOptions = React.useMemo(() => ({
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { position: 'right', labels: { color: '#333333', usePointStyle: true, font: { size: 18, weight: '600' } } },
+            tooltip: {
+                callbacks: {
+                    label: (ctx) => {
+                        const val = ctx.raw || 0;
+                        const total = ctx.chart.data._meta?.total || (ctx.dataset.data || []).reduce((a,b)=>a+(b||0),0) || 1;
+                        const pct = ((val / total) * 100).toFixed(1);
+                        return `${ctx.label}: ${formatCurrency(val)} (${pct}%)`;
+                    }
+                }
+            }
+        }
+    }), []);
+
     return (
         <div className="font-sans text-[#333333] bg-white p-4 sm:p-8 min-h-screen flex justify-center items-start">
             <div className="w-full max-w-[1840px] flex flex-col gap-6">
@@ -1210,25 +1305,53 @@ function App() {
 
                 {/* Inputfelt for porteføljestørrelse, årlig sparing og aksjeandel */}
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-						<div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col gap-6" style={{ minHeight: '250px' }}>
+						<div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col gap-6 relative" style={{ minHeight: '350px' }}>
                         <h2 className="typo-h2 text-[#4A6D8C]">Forutsetninger</h2>
-							<SliderInput id="initialPortfolioSize" label="Porteføljestørrelse (NOK)" value={state.initialPortfolioSize} min={1000000} max={100000000} step={250000} onChange={handleStateChange} isCurrency allowDirectInput />
-                        <SliderInput id="annualSavings" label="Årlig sparing (NOK)" value={state.annualSavings} min={0} max={1200000} step={10000} onChange={handleStateChange} isCurrency />
+                        <button
+                            onClick={() => setShowAssumptionsGraphic(true)}
+                            className="absolute top-4 right-4 bg-white hover:bg-gray-50 text-[#4A6D8C] rounded-xl p-2.5 shadow-sm border border-[#DDDDDD]"
+                            title="Vis grafikk"
+                            aria-label="Vis grafikk"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M4 4h6v6H4z"></path>
+                                <path d="M14 4h6v6h-6z"></path>
+                                <path d="M4 14h6v6H4z"></path>
+                                <path d="M14 14h6v6h-6z"></path>
+                            </svg>
+                        </button>
+							<SliderInput id="initialPortfolioSize" label="Portefølje I (NOK)" value={state.initialPortfolioSize} min={1000000} max={100000000} step={250000} onChange={handleStateChange} isCurrency allowDirectInput />
+							<SliderInput id="pensionPortfolioSize" label="Portefølje II (NOK)" value={state.pensionPortfolioSize} min={0} max={10000000} step={250000} onChange={handleStateChange} isCurrency />
+							<SliderInput id="additionalPensionAmount" label="Likviditetsfond (NOK)" value={state.additionalPensionAmount} min={0} max={5000000} step={50000} onChange={handleStateChange} isCurrency />
                     </div>
                     <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col gap-6 xl:col-span-2" style={{ minHeight: '250px' }}>
                         <div>
-                            <h2 className="typo-h2 text-[#4A6D8C]">Aksjeandel første år (%)</h2>
-                            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-2 mt-2">
+                            <h2 className="typo-h2 text-[#4A6D8C]">Aksjeandel</h2>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-2 mt-8 items-center">
                                 {STOCK_ALLOCATION_OPTIONS.map(opt => (
                                     <button key={opt.value} onClick={() => handleStateChange('initialStockAllocation', opt.value)} className={`${state.initialStockAllocation === opt.value ? 'bg-[#66CCDD] text-white shadow-lg' : 'bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100'} h-20 rounded-lg flex items-center justify-center text-center p-1 text-sm font-medium transition-all hover:-translate-y-0.5`}>
                                         {opt.label}
                                     </button>
                                 ))}
-                                {/* Ny knapp: Målsøk sparing (plassert rett under "100% Renter") */}
-                                <div className="col-start-1 p-1 border rounded-lg bg-[#EAF5FB] border-[#CFE7F5]">
-                                    <button type="button" onClick={goalSeekAnnualSavings} className="w-full bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100 h-20 rounded-lg flex items-center justify-center text-center p-1 text-sm font-medium transition-all hover:-translate-y-0.5">
-                                        Målsøk sparing
-                                    </button>
+                                {/* Målsøk sparing knapp - identisk i størrelse med kortene over */}
+                                <button
+                                    type="button"
+                                    onClick={goalSeekAnnualSavings}
+                                    className="bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100 h-20 rounded-lg flex items-center justify-center text-center p-1 text-sm font-medium transition-all hover:-translate-y-0.5"
+                                >
+                                    Målsøk sparing
+                                </button>
+                                {/* Slider på samme linje som knappen (xl), innrammet mellom 20% og 85% */}
+                                <div className="hidden xl:flex xl:col-start-2 xl:col-end-6 items-center">
+                                    <div className="bg-white border border-[#DDDDDD] rounded-lg h-20 w-full flex items-center px-4">
+                                        <SliderInput id="annualSavings" label="Sparing" value={state.annualSavings} min={0} max={1200000} step={10000} onChange={handleStateChange} isCurrency inline />
+                                    </div>
+                                </div>
+                            </div>
+                            {/* Fallback for mindre skjermer: plasser slider under */}
+                            <div className="xl:hidden mt-2">
+                                <div className="w-[740px] max-w-full mx-auto">
+                                    <SliderInput id="annualSavings" label="Sparing" value={state.annualSavings} min={0} max={1200000} step={10000} onChange={handleStateChange} isCurrency inline />
                                 </div>
                             </div>
                         </div>
@@ -1294,6 +1417,30 @@ Alle uttak fra et as vil i modellen ansees som et utbytte. Om det er innskutt ka
                         </div>
                     </div>
                 )}
+
+                {showAssumptionsGraphic && (
+                    <div
+                        className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+                        onClick={() => setShowAssumptionsGraphic(false)}
+                    >
+                        <div
+                            className="bg-white rounded-xl shadow-2xl max-w-[1200px] w-full p-10 relative max-h-[90vh] overflow-auto text-[1.25rem]"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <button
+                                aria-label="Lukk"
+                                onClick={() => setShowAssumptionsGraphic(false)}
+                                className="absolute top-3 right-3 text-[#333333]/70 hover:text-[#333333]"
+                            >
+                                ✕
+                            </button>
+                            <h3 className="typo-h3 text-[#4A6D8C] mb-6 text-[2rem]">Fordeling mellom porteføljer</h3>
+                            <div className="h-[640px] bg-[#F7F7F8] rounded-xl border border-[#EEEEEE] p-6 shadow-inner">
+                                <Doughnut type="doughnut" data={pieData} options={pieOptions} />
+                            </div>
+                        </div>
+                    </div>
+                )}
                 
                 {showAllocationChart && (
                     <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col">
@@ -1321,7 +1468,6 @@ Alle uttak fra et as vil i modellen ansees som et utbytte. Om det er innskutt ka
                     <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col gap-6">
                         <h2 className="typo-h2 text-[#4A6D8C]">Forutsetninger</h2>
                         <SliderInput id="investedCapital" label="Innskutt kapital (skattefri) (NOK)" value={state.investedCapital} min={0} max={state.initialPortfolioSize + state.pensionPortfolioSize} step={100000} onChange={handleStateChange} isCurrency />
-                        <SliderInput id="pensionPortfolioSize" label="Pensjonsportefølje (NOK)" value={state.pensionPortfolioSize} min={0} max={10000000} step={250000} onChange={handleStateChange} isCurrency />
                         <SliderInput id="investmentYears" label="Antall år investeringsperiode" value={state.investmentYears} min={1} max={30} step={1} onChange={handleStateChange} unit="år" />
                         <SliderInput id="payoutYears" label="Antall år med utbetaling" value={state.payoutYears} min={0} max={30} step={1} onChange={handleStateChange} unit="år" />
                          
@@ -1375,9 +1521,23 @@ Alle uttak fra et as vil i modellen ansees som et utbytte. Om det er innskutt ka
                             {/* Rådgivningshonorar knapper */}
                             <div className="mt-4">
                                 <div className="typo-label text-[#333333]/80 mb-2">Rådgivningshonorar</div>
-                                <div className="grid grid-cols-6 gap-2">
+                                <div className="grid grid-cols-6 gap-2 items-center">
+                                    {/* Fritekstfelt (venstre) */}
+                                    <div className="relative">
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            max="5"
+                                            value={advisoryInputValue}
+                                            onChange={(e) => setAdvisoryInputValue(e.target.value)}
+                                            onBlur={(e) => handleStateChange('advisoryFeeRate', parseFloat(e.target.value) || 0)}
+                                            className="w-full h-12 bg-white border border-[#DDDDDD] rounded-lg text-center text-base text-[#333333] focus:outline-none focus:ring-2 focus:ring-[#66CCDD] focus:border-transparent pr-8"
+                                        />
+                                        <span className="absolute inset-y-0 right-2 flex items-center text-[#333333]/80">%</span>
+                                    </div>
+                                    {/* Forhåndsvalg */}
                                     {[
-                                        { label: '0%', value: 0.0 },
                                         { label: '1,37%', value: 1.37 },
                                         { label: '0,93%', value: 0.93 },
                                         { label: '0,81%', value: 0.81 },
@@ -1386,7 +1546,10 @@ Alle uttak fra et as vil i modellen ansees som et utbytte. Om det er innskutt ka
                                     ].map(opt => (
                                         <button
                                             key={opt.label}
-                                            onClick={() => handleStateChange('advisoryFeeRate', opt.value)}
+                                            onClick={() => {
+                                                handleStateChange('advisoryFeeRate', opt.value);
+                                                setAdvisoryInputValue((v) => v); // behold brukerens manuelle verdi i feltet
+                                            }}
                                             className={`${state.advisoryFeeRate === opt.value ? 'bg-[#66CCDD] text-white shadow-lg' : 'bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100'} h-12 rounded-lg flex items-center justify-center text-center p-1 text-sm font-medium transition-all hover:-translate-y-0.5`}
                                         >
                                             {opt.label}

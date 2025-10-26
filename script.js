@@ -156,6 +156,10 @@ const INITIAL_APP_STATE = {
     kpiRate: 0.0, // Ny slider for forventet KPI
     deferredInterestTax: false, // Utsatt skatt på renter (kun Privat)
     advisoryFeeRate: 0.0, // Rådgivningshonorar (prosentpoeng)
+    // Uavhengige valg for aksjeandel per rad (UI)
+    row1StockAllocation: 0,
+    row2StockAllocation: 0,
+    row3StockAllocation: 0,
 };
 
 const STOCK_ALLOCATION_OPTIONS = [
@@ -212,7 +216,7 @@ const calculatePrognosis = (state) => {
         annualStockPercentages: [], annualBondPercentages: [], investedCapitalHistory: []
     };
 
-    let currentPortfolioValue = state.initialPortfolioSize + (state.pensionPortfolioSize || 0);
+    let currentPortfolioValue = state.initialPortfolioSize + (state.pensionPortfolioSize || 0) + (state.additionalPensionAmount || 0);
     let taxFreeCapitalRemaining = state.investedCapital;
     let deferredEventTax = 0; // Tax from an event to be paid NEXT year.
     let deferredBondTax = 0; // Bond tax to be paid NEXT year (when using deferred mode)
@@ -233,7 +237,7 @@ const calculatePrognosis = (state) => {
     // --- START ROW ("start") BEFORE FIRST YEAR ---
     labels.push('start');
     // "Start" skal vise total investeringssum i hovedstol
-    data.hovedstol.push(Math.round(state.initialPortfolioSize + (state.pensionPortfolioSize || 0)));
+    data.hovedstol.push(Math.round(state.initialPortfolioSize + (state.pensionPortfolioSize || 0) + (state.additionalPensionAmount || 0)));
     data.avkastning.push(0);
     data.sparing.push(0);
     data.event_total.push(0);
@@ -491,7 +495,7 @@ const formatCurrency = (value) => new Intl.NumberFormat('nb-NO', { style: 'curre
 const formatNumberRaw = (value) => new Intl.NumberFormat('nb-NO', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value);
 
 // --- HELPER & CHILD COMPONENTS --- //
-const SliderInput = ({ id, label, value, min, max, step, onChange, unit, isCurrency, displayValue, allowDirectInput, inline }) => {
+const SliderInput = ({ id, label, value, min, max, step, onChange, unit, isCurrency, displayValue, allowDirectInput, inline, thumbColor }) => {
 	const [textValue, setTextValue] = React.useState(() => (isCurrency ? formatCurrency(value) : `${formatNumberRaw(value)}${unit ? ` ${unit}` : ''}`));
 
 	React.useEffect(() => {
@@ -525,7 +529,8 @@ const SliderInput = ({ id, label, value, min, max, step, onChange, unit, isCurre
                         step={step}
                         value={value}
                         onChange={(e) => onChange(id, parseFloat(e.target.value))}
-                        className="w-full h-2 bg-[#DDDDDD] rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-[#66CCDD] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white"
+                        className="w-full h-2 bg-[#DDDDDD] rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-[var(--thumb-color,#66CCDD)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white"
+                        style={thumbColor ? { '--thumb-color': thumbColor } : undefined}
                     />
                     {allowDirectInput ? (
                     <input
@@ -555,7 +560,8 @@ const SliderInput = ({ id, label, value, min, max, step, onChange, unit, isCurre
                             step={step}
                             value={value}
                             onChange={(e) => onChange(id, parseFloat(e.target.value))}
-                            className="w-full h-2 bg-[#DDDDDD] rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-[#66CCDD] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white"
+                            className="w-full h-2 bg-[#DDDDDD] rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-[var(--thumb-color,#66CCDD)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white"
+                            style={thumbColor ? { '--thumb-color': thumbColor } : undefined}
                         />
                         {allowDirectInput ? (
                             <input
@@ -828,15 +834,33 @@ function App() {
 	const [outputText, setOutputText] = useState('');
 	const [copied, setCopied] = useState(false);
     const [showAssumptionsGraphic, setShowAssumptionsGraphic] = useState(false);
-    const [advisoryInputValue, setAdvisoryInputValue] = useState(INITIAL_APP_STATE.advisoryFeeRate);
+    const [advisoryInputValue, setAdvisoryInputValue] = useState(INITIAL_APP_STATE.advisoryFeeRate.toFixed(2).replace('.', ','));
+    const [waterfallMode, setWaterfallMode] = useState(false);
+
+    // Beregn vektet aksjeandel ved start basert på tre porteføljer
+    const computeInitialStockPct = useCallback((s) => {
+        const p1 = Math.max(0, s.initialPortfolioSize || 0); // Portefølje I
+        const p2 = Math.max(0, s.pensionPortfolioSize || 0); // Portefølje II
+        const lf = Math.max(0, s.additionalPensionAmount || 0); // Likviditetsfond (100% renter)
+        const total = p1 + p2 + lf;
+        if (total <= 0) return 0;
+        const wStock = (p1 * (s.row1StockAllocation || 0)) + (p2 * (s.row2StockAllocation || 0)) + (lf * 0);
+        return Math.round(wStock / total);
+    }, []);
 
     const handleStateChange = useCallback((id, value) => {
         setState(prevState => {
             const newState = { ...prevState, [id]: value };
+            // Vektet aksjeandel ved start fra Portefølje I, Portefølje II og Likviditetsfond (0% aksjer)
+            newState.initialStockAllocation = computeInitialStockPct(newState);
             const combinedPortfolio = (id === 'initialPortfolioSize' ? value : newState.initialPortfolioSize) +
-                                      (id === 'pensionPortfolioSize' ? value : newState.pensionPortfolioSize);
+                                      (id === 'pensionPortfolioSize' ? value : newState.pensionPortfolioSize) +
+                                      (id === 'additionalPensionAmount' ? value : newState.additionalPensionAmount);
 
             if ((id === 'initialPortfolioSize' || id === 'pensionPortfolioSize') && newState.investedCapital > combinedPortfolio) {
+                newState.investedCapital = combinedPortfolio;
+            }
+            if (id === 'additionalPensionAmount' && newState.investedCapital > combinedPortfolio) {
                 newState.investedCapital = combinedPortfolio;
             }
             if (id === 'investedCapital' && value > combinedPortfolio) {
@@ -844,7 +868,7 @@ function App() {
             }
             return newState;
         });
-    }, []);
+    }, [computeInitialStockPct]);
 
     const handleResetAll = useCallback(() => {
         setState({
@@ -854,6 +878,9 @@ function App() {
             desiredAnnualPayoutAfterTax: 0,
             annualSavings: 0,
             initialStockAllocation: 0, // 100% renter
+            row1StockAllocation: 0,
+            row2StockAllocation: 0,
+            row3StockAllocation: 0,
             events: [],
             investorType: 'Privat', // Beholder Privat som standard
             manualBondTaxRate: 22.0, // Beholder standard kapitalskatt
@@ -1163,7 +1190,7 @@ function App() {
         const bondReturn = new Array(len).fill(0);
 
         // Startverdier (første rad = 'start')
-        const combinedStart = state.initialPortfolioSize + (state.pensionPortfolioSize || 0);
+        const combinedStart = state.initialPortfolioSize + (state.pensionPortfolioSize || 0) + (state.additionalPensionAmount || 0);
         stockPrincipal[0] = Math.round(combinedStart * stockShareArr[0]);
         bondPrincipal[0] = Math.round(combinedStart * bondShareArr[0]);
         stockReturn[0] = 0;
@@ -1244,45 +1271,53 @@ function App() {
     const totalYears = state.investmentYears + state.payoutYears;
     const maxEventYear = START_YEAR + totalYears - 1;
 
-    // --- Pie chart for portfolio split ---
-    const pieData = React.useMemo(() => {
-        const values = [
-            Math.max(0, state.initialPortfolioSize || 0),
-            Math.max(0, state.pensionPortfolioSize || 0),
-            Math.max(0, state.additionalPensionAmount || 0),
-        ];
-        const total = values.reduce((a, b) => a + b, 0) || 1;
-        return {
-            labels: ['Portefølje I', 'Portefølje II', 'Likviditetsfond'],
-            datasets: [{
-                data: values,
-                backgroundColor: [CHART_COLORS.hovedstol, CHART_COLORS.sparing, CHART_COLORS.avkastning],
-                borderColor: [CHART_COLORS.hovedstol, CHART_COLORS.sparing, CHART_COLORS.avkastning],
-                borderWidth: 2,
-                hoverOffset: 10,
-                offset: (ctx) => [12, 8, 6][ctx.dataIndex] || 6,
-            }],
-            _meta: { total }
-        };
-    }, [state.initialPortfolioSize, state.pensionPortfolioSize, state.additionalPensionAmount]);
+    // --- Assumptions modal: four columns with stock/rente share ---
+    const assumptionsBars = React.useMemo(() => {
+        const p1 = Math.max(0, state.initialPortfolioSize || 0);
+        const p2 = Math.max(0, state.pensionPortfolioSize || 0);
+        const lf = Math.max(0, state.additionalPensionAmount || 0);
+        const total = p1 + p2 + lf;
 
-    const pieOptions = React.useMemo(() => ({
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-            legend: { position: 'right', labels: { color: '#333333', usePointStyle: true, font: { size: 18, weight: '600' } } },
-            tooltip: {
-                callbacks: {
-                    label: (ctx) => {
-                        const val = ctx.raw || 0;
-                        const total = ctx.chart.data._meta?.total || (ctx.dataset.data || []).reduce((a,b)=>a+(b||0),0) || 1;
-                        const pct = ((val / total) * 100).toFixed(1);
-                        return `${ctx.label}: ${formatCurrency(val)} (${pct}%)`;
-                    }
-                }
-            }
-        }
-    }), []);
+        const pct = (num, den) => (den > 0 ? Math.round((num / den) * 100) : 0);
+
+        const p1Stock = pct(state.row1StockAllocation, 100); // row values already in %
+        const p2Stock = pct(state.row2StockAllocation, 100);
+        const lfStock = 0; // Likviditetsfond = 100% renter
+
+        const totalStock = (total > 0)
+            ? Math.round(((p1 * p1Stock) + (p2 * p2Stock) + (lf * lfStock)) / total)
+            : 0;
+
+        const bars = [];
+        if (p1 > 0) bars.push({ key: 'p1', label: 'Portefølje I', stockPct: p1Stock, color: CHART_COLORS.hovedstol });
+        if (p2 > 0) bars.push({ key: 'p2', label: 'Portefølje II', stockPct: p2Stock, color: CHART_COLORS.sparing });
+        if (lf > 0) bars.push({ key: 'lf', label: 'Likviditetsfond', stockPct: lfStock, color: CHART_COLORS.avkastning });
+        // Totalportefølje vises alltid
+        bars.push({ key: 'tot', label: 'Totalportefølje', stockPct: totalStock, color: CHART_COLORS.hovedstol });
+        return bars;
+    }, [state.initialPortfolioSize, state.pensionPortfolioSize, state.additionalPensionAmount, state.row1StockAllocation, state.row2StockAllocation]);
+
+    // Fixed-order slots for original view, keep positions even if some portfolios are zero
+    const assumptionSlots = React.useMemo(() => {
+        const p1 = Math.max(0, state.initialPortfolioSize || 0);
+        const p2 = Math.max(0, state.pensionPortfolioSize || 0);
+        const lf = Math.max(0, state.additionalPensionAmount || 0);
+        const total = p1 + p2 + lf;
+        const pct = (num, den) => (den > 0 ? Math.round((num / den) * 100) : 0);
+        const p1Stock = pct(state.row1StockAllocation, 100);
+        const p2Stock = pct(state.row2StockAllocation, 100);
+        const lfStock = 0;
+        const totalStock = (total > 0)
+            ? Math.round(((p1 * p1Stock) + (p2 * p2Stock) + (lf * lfStock)) / total)
+            : 0;
+
+        return [
+            { key: 'p1', label: 'Portefølje I', stockPct: p1Stock, color: CHART_COLORS.hovedstol, present: p1 > 0 },
+            { key: 'p2', label: 'Portefølje II', stockPct: p2Stock, color: CHART_COLORS.sparing, present: p2 > 0 },
+            { key: 'lf', label: 'Likviditetsfond', stockPct: lfStock, color: CHART_COLORS.avkastning, present: lf > 0 },
+            { key: 'tot', label: 'Totalportefølje', stockPct: totalStock, color: CHART_COLORS.hovedstol, present: true },
+        ];
+    }, [state.initialPortfolioSize, state.pensionPortfolioSize, state.additionalPensionAmount, state.row1StockAllocation, state.row2StockAllocation]);
 
     return (
         <div className="font-sans text-[#333333] bg-white p-4 sm:p-8 min-h-screen flex justify-center items-start">
@@ -1304,9 +1339,11 @@ function App() {
                 </div>
 
                 {/* Inputfelt for porteføljestørrelse, årlig sparing og aksjeandel */}
-                <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-						<div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col gap-6 relative" style={{ minHeight: '350px' }}>
-                        <h2 className="typo-h2 text-[#4A6D8C]">Forutsetninger</h2>
+                <div className="relative">
+                    <div className="absolute inset-0 z-0 bg-white border border-[#DDDDDD] rounded-xl pointer-events-none"></div>
+                    <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 relative z-10">
+						<div className="p-6 flex flex-col gap-6 relative" style={{ minHeight: '350px' }}>
+                            <h2 className="typo-h2 text-[#4A6D8C]">Forutsetninger</h2>
                         <button
                             onClick={() => setShowAssumptionsGraphic(true)}
                             className="absolute top-4 right-4 bg-white hover:bg-gray-50 text-[#4A6D8C] rounded-xl p-2.5 shadow-sm border border-[#DDDDDD]"
@@ -1320,29 +1357,56 @@ function App() {
                                 <path d="M14 14h6v6h-6z"></path>
                             </svg>
                         </button>
-							<SliderInput id="initialPortfolioSize" label="Portefølje I (NOK)" value={state.initialPortfolioSize} min={1000000} max={100000000} step={250000} onChange={handleStateChange} isCurrency allowDirectInput />
-							<SliderInput id="pensionPortfolioSize" label="Portefølje II (NOK)" value={state.pensionPortfolioSize} min={0} max={10000000} step={250000} onChange={handleStateChange} isCurrency />
-							<SliderInput id="additionalPensionAmount" label="Likviditetsfond (NOK)" value={state.additionalPensionAmount} min={0} max={5000000} step={50000} onChange={handleStateChange} isCurrency />
+                            <SliderInput id="initialPortfolioSize" label="Portefølje I (NOK)" value={state.initialPortfolioSize} min={1000000} max={100000000} step={250000} onChange={handleStateChange} isCurrency allowDirectInput thumbColor="#4A6D8C" />
+                            <div className="mt-3">
+                                <SliderInput id="pensionPortfolioSize" label="Portefølje II (NOK)" value={state.pensionPortfolioSize} min={0} max={10000000} step={250000} onChange={handleStateChange} isCurrency thumbColor="#3388CC" />
+                            </div>
+						<div className="mt-3">
+							<SliderInput id="additionalPensionAmount" label="Likviditetsfond (NOK)" value={state.additionalPensionAmount} min={0} max={5000000} step={50000} onChange={handleStateChange} isCurrency thumbColor="#88CCEE" />
+						</div>
                     </div>
-                    <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col gap-6 xl:col-span-2" style={{ minHeight: '250px' }}>
+                    <div className="p-6 flex flex-col gap-6 xl:col-span-2" style={{ minHeight: '250px' }}>
                         <div>
                             <h2 className="typo-h2 text-[#4A6D8C]">Aksjeandel</h2>
-                            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-2 mt-8 items-center">
-                                {STOCK_ALLOCATION_OPTIONS.map(opt => (
-                                    <button key={opt.value} onClick={() => handleStateChange('initialStockAllocation', opt.value)} className={`${state.initialStockAllocation === opt.value ? 'bg-[#66CCDD] text-white shadow-lg' : 'bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100'} h-20 rounded-lg flex items-center justify-center text-center p-1 text-sm font-medium transition-all hover:-translate-y-0.5`}>
-                                        {opt.label}
+                            <div className="flex flex-col gap-3 mt-8">
+                                {/* Rad 1 */}
+                                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-2 items-center">
+                                    {STOCK_ALLOCATION_OPTIONS.map(opt => (
+                                        <button key={`row1-${opt.value}`} onClick={() => handleStateChange('row1StockAllocation', opt.value)} className={`${state.row1StockAllocation === opt.value ? 'bg-[#4A6D8C] text-white shadow-lg' : 'bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100'} h-20 rounded-lg flex items-center justify-center text-center p-1 text-sm font-medium transition-all hover:-translate-y-0.5`}>
+                                            {opt.label}
+                                        </button>
+                                    ))}
+                                </div>
+                                {/* Rad 2 */}
+                                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-2 items-center">
+                                    {STOCK_ALLOCATION_OPTIONS.map(opt => (
+                                        <button key={`row2-${opt.value}`} onClick={() => handleStateChange('row2StockAllocation', opt.value)} className={`${state.row2StockAllocation === opt.value ? 'bg-[#3388CC] text-white shadow-lg' : 'bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100'} h-20 rounded-lg flex items-center justify-center text-center p-1 text-sm font-medium transition-all hover:-translate-y-0.5`}>
+                                            {opt.label}
+                                        </button>
+                                    ))}
+                                </div>
+                                {/* Rad 3: Låst til 100% Renter */}
+                                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-2 items-center">
+                                    <button type="button" disabled className="bg-[#88CCEE] text-white shadow-lg h-20 rounded-lg flex items-center justify-center text-center p-1 text-sm font-medium cursor-default">
+                                        100% Renter
                                     </button>
-                                ))}
-                                {/* Målsøk sparing knapp - identisk i størrelse med kortene over */}
+                                </div>
+                                {/* Målsøk sparing og slider */}
                                 <button
                                     type="button"
                                     onClick={goalSeekAnnualSavings}
-                                    className="bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100 h-20 rounded-lg flex items-center justify-center text-center p-1 text-sm font-medium transition-all hover:-translate-y-0.5"
+                                    className="xl:hidden bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100 h-20 rounded-lg flex items-center justify-center text-center p-1 text-sm font-medium transition-all hover:-translate-y-0.5"
                                 >
                                     Målsøk sparing
                                 </button>
-                                {/* Slider på samme linje som knappen (xl), innrammet mellom 20% og 85% */}
-                                <div className="hidden xl:flex xl:col-start-2 xl:col-end-6 items-center">
+                                <div className="hidden xl:flex items-center">
+                                    <button
+                                        type="button"
+                                        onClick={goalSeekAnnualSavings}
+                                        className="bg-white border border-[#DDDDDD] text-[#333333] hover:bg-gray-100 h-20 rounded-lg items-center justify-center text-center p-1 text-sm font-medium transition-all hover:-translate-y-0.5 mr-2 px-4"
+                                    >
+                                        Målsøk sparing
+                                    </button>
                                     <div className="bg-white border border-[#DDDDDD] rounded-lg h-20 w-full flex items-center px-4">
                                         <SliderInput id="annualSavings" label="Sparing" value={state.annualSavings} min={0} max={1200000} step={10000} onChange={handleStateChange} isCurrency inline />
                                     </div>
@@ -1355,6 +1419,7 @@ function App() {
                                 </div>
                             </div>
                         </div>
+                    </div>
                     </div>
                 </div>
 
@@ -1434,9 +1499,129 @@ Alle uttak fra et as vil i modellen ansees som et utbytte. Om det er innskutt ka
                             >
                                 ✕
                             </button>
-                            <h3 className="typo-h3 text-[#4A6D8C] mb-6 text-[2rem]">Fordeling mellom porteføljer</h3>
-                            <div className="h-[640px] bg-[#F7F7F8] rounded-xl border border-[#EEEEEE] p-6 shadow-inner">
-                                <Doughnut type="doughnut" data={pieData} options={pieOptions} />
+                            <h3 className="typo-h3 text-[#4A6D8C] mb-6 text-[2rem]">Totalfordeling mellom alle porteføljer</h3>
+                            <div className="h-[360px] sm:h-[420px] bg-[#F7F7F8] rounded-xl border border-[#EEEEEE] p-6 shadow-inner flex items-end relative">
+                                <button
+                                    type="button"
+                                    onClick={() => setWaterfallMode(v => !v)}
+                                    className="absolute top-3 right-3 text-xs px-2 py-1 rounded-md border border-[#4A6D8C]/40 bg-white/80 text-[#4A6D8C] hover:bg-gray-100"
+                                    title="Waterfall"
+                                >
+                                    Waterfall
+                                </button>
+
+                                {!waterfallMode && (
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-6 w-full">
+                                    {assumptionSlots.map((bar) => {
+                                        const bondPct = Math.max(0, 100 - (bar.stockPct || 0));
+                                        const labelText = (bar.stockPct === 0)
+                                            ? '100% renter'
+                                            : `${bar.stockPct}% aksjer`;
+                                        const bondLabelText = `${bondPct}% renter`;
+                                        return (
+                                            <div key={bar.key} className="flex flex-col items-center justify-end" style={{ height: '352px' }}>
+                                                <div className={`relative w-36 sm:w-40 h-full rounded-lg overflow-hidden ${bar.present ? 'bg-white shadow' : ''}`}>
+                                                    {bar.present && (
+                                                        <>
+                                                            <div className="absolute inset-0 flex flex-col-reverse">
+                                                                <div style={{ height: `${bondPct}%`, backgroundColor: '#D1DCE7' }}></div>
+                                                                <div style={{ height: `${bar.stockPct}%`, backgroundColor: bar.color }}></div>
+                                                            </div>
+                                                            {bar.stockPct > 0 ? (
+                                                                <div className="absolute left-0 right-0 flex items-center justify-center text-center px-2"
+                                                                    style={{ top: `calc(${bar.stockPct / 2}% )`, transform: 'translateY(-50%)' }}>
+                                                                    <span className="text-white font-semibold text-lg drop-shadow-sm select-none leading-tight">{labelText}</span>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="absolute inset-0 flex items-center justify-center text-center px-2">
+                                                                    <span className="text-white font-semibold text-lg drop-shadow-sm select-none leading-tight">{labelText}</span>
+                                                                </div>
+                                                            )}
+                                                            {bondPct > 0 && bar.stockPct > 0 && (
+                                                                <div className="absolute left-0 right-0 flex items-center justify-center text-center px-2"
+                                                                    style={{ top: `calc(100% - ${bondPct / 2}% )`, transform: 'translateY(-50%)' }}>
+                                                                    <span className="text-white font-semibold text-lg drop-shadow-sm select-none leading-tight">{bondLabelText}</span>
+                                                                </div>
+                                                            )}
+                                                        </>
+                                                    )}
+                                                </div>
+                                                <div className="mt-2 text-center text-[#333333] text-base font-medium leading-tight">
+                                                    {bar.label}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                                )}
+
+                                {waterfallMode && (
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-6 w-full">
+                                    {(() => {
+                                        const p1 = Math.max(0, state.initialPortfolioSize || 0);
+                                        const p2 = Math.max(0, state.pensionPortfolioSize || 0);
+                                        const lf = Math.max(0, state.additionalPensionAmount || 0);
+                                        const total = p1 + p2 + lf;
+                                        const maxHeight = 322;
+                                        const heightFor = (v) => (total > 0 ? Math.max(8, Math.round((v / total) * maxHeight)) : 8);
+
+                                        const items = [];
+                                        if (p1 > 0) items.push({ key: 'p1w', label: 'Portefølje I', value: p1, color: CHART_COLORS.hovedstol });
+                                        if (p2 > 0) items.push({ key: 'p2w', label: 'Portefølje II', value: p2, color: CHART_COLORS.sparing });
+                                        if (lf > 0) items.push({ key: 'lfw', label: 'Likviditetsfond', value: lf, color: CHART_COLORS.avkastning });
+
+                                        // Calculate pixel heights with per-item minimums (LF + P2), then scale to fit container if needed
+                                        const MIN_STEP_PX = 56;
+                                        const rawHeights = items.map((it) => {
+                                            const proportional = total > 0 ? Math.round((it.value / total) * maxHeight) : 0;
+                                            const needsMin = (it.key === 'p2w' || it.key === 'lfw');
+                                            return Math.max(proportional, needsMin ? MIN_STEP_PX : 8);
+                                        });
+                                        const sumRaw = rawHeights.reduce((a,b)=>a+b,0);
+                                        const scale = sumRaw > maxHeight ? (maxHeight / sumRaw) : 1;
+                                        const heights = rawHeights.map(h => Math.round(h * scale));
+
+                                        let offsetPx = 0;
+                                        const stepBars = items.map((it, idx) => {
+                                            const h = heights[idx];
+                                            const comp = (
+                                                <div key={it.key} className="flex flex-col items-center justify-end h-[322px]">
+                                                    <div className="relative w-36 sm:w-40 rounded-lg overflow-visible" style={{ height: `${maxHeight}px` }}>
+                                                        <div className="absolute left-0 right-0" style={{ height: `${h}px`, bottom: `${offsetPx}px` }}>
+                                                            <div className="w-full h-full flex items-center justify-center rounded-lg" style={{ backgroundColor: it.color }}>
+                                                                <span className="text-white font-semibold text-base sm:text-lg drop-shadow-sm select-none px-1 whitespace-nowrap">{formatCurrency(it.value)}</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="mt-2 text-center text-[#333333] text-base font-medium leading-tight">{it.label}</div>
+                                                </div>
+                                            );
+                                            offsetPx += h;
+                                            return comp;
+                                        });
+
+                                        const placeholders = Array.from({ length: Math.max(0, 3 - items.length) }).map((_, i) => (
+                                            <div key={`ph-${i}`} className="hidden md:block"></div>
+                                        ));
+
+                                        const totalBar = (
+                                            <div key="total-w" className="flex flex-col items-center justify-end h-[322px]">
+                                                <div className="relative w-36 sm:w-40 rounded-lg overflow-visible" style={{ height: `${maxHeight}px` }}>
+                                                    <div className="absolute left-0 right-0 bottom-0" style={{ height: `${maxHeight}px` }}>
+                                                        <div className="w-full h-full flex items-center justify-center rounded-lg" style={{ backgroundColor: CHART_COLORS.hovedstol }}>
+                                                            <span className="text-white font-semibold text-base sm:text-lg drop-shadow-sm select-none px-1 whitespace-nowrap">{formatCurrency(total)}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="mt-2 text-center text-[#333333] text-base font-medium leading-tight">Totalportefølje</div>
+                                            </div>
+                                        );
+
+                                        return [...stepBars, ...placeholders, totalBar];
+                                    })()}
+                                </div>
+                                )}
+                                {/* Legend intentionally hidden per request */}
                             </div>
                         </div>
                     </div>
@@ -1467,7 +1652,7 @@ Alle uttak fra et as vil i modellen ansees som et utbytte. Om det er innskutt ka
                     {/* Assumptions Panel */}
                     <div className="bg-white border border-[#DDDDDD] rounded-xl p-6 flex flex-col gap-6">
                         <h2 className="typo-h2 text-[#4A6D8C]">Forutsetninger</h2>
-                        <SliderInput id="investedCapital" label="Innskutt kapital (skattefri) (NOK)" value={state.investedCapital} min={0} max={state.initialPortfolioSize + state.pensionPortfolioSize} step={100000} onChange={handleStateChange} isCurrency />
+                        <SliderInput id="investedCapital" label="Innskutt kapital (skattefri) (NOK)" value={state.investedCapital} min={0} max={state.initialPortfolioSize + state.pensionPortfolioSize + state.additionalPensionAmount} step={100000} onChange={handleStateChange} isCurrency />
                         <SliderInput id="investmentYears" label="Antall år investeringsperiode" value={state.investmentYears} min={1} max={30} step={1} onChange={handleStateChange} unit="år" />
                         <SliderInput id="payoutYears" label="Antall år med utbetaling" value={state.payoutYears} min={0} max={30} step={1} onChange={handleStateChange} unit="år" />
                          
@@ -1525,13 +1710,25 @@ Alle uttak fra et as vil i modellen ansees som et utbytte. Om det er innskutt ka
                                     {/* Fritekstfelt (venstre) */}
                                     <div className="relative">
                                         <input
-                                            type="number"
-                                            step="0.01"
-                                            min="0"
-                                            max="5"
+                                            type="text"
+                                            inputMode="decimal"
                                             value={advisoryInputValue}
-                                            onChange={(e) => setAdvisoryInputValue(e.target.value)}
-                                            onBlur={(e) => handleStateChange('advisoryFeeRate', parseFloat(e.target.value) || 0)}
+                                            onChange={(e) => {
+                                                const raw = (e.target.value || '').replace(/\s/g, '').replace(',', '.');
+                                                if (raw === '') { setAdvisoryInputValue(''); return; }
+                                                if (/^\d*\.?\d{0,2}$/.test(raw)) {
+                                                    setAdvisoryInputValue(raw.replace('.', ','));
+                                                }
+                                            }}
+                                            onBlur={(e) => {
+                                                const raw = (e.target.value || '').replace(/\s/g, '').replace(',', '.');
+                                                let num = parseFloat(raw);
+                                                if (isNaN(num)) num = 0;
+                                                if (num < 0) num = 0;
+                                                if (num > 5) num = 5;
+                                                handleStateChange('advisoryFeeRate', num);
+                                                setAdvisoryInputValue(num.toFixed(2).replace('.', ','));
+                                            }}
                                             className="w-full h-12 bg-white border border-[#DDDDDD] rounded-lg text-center text-base text-[#333333] focus:outline-none focus:ring-2 focus:ring-[#66CCDD] focus:border-transparent pr-8"
                                         />
                                         <span className="absolute inset-y-0 right-2 flex items-center text-[#333333]/80">%</span>
